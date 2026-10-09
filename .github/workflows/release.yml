@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Version to release, for example 1.0.0
+        description: Version to release, for example 2.0.0
         required: true
-        default: 1.0.0
+        default: 2.0.0
   push:
     tags:
       - "v*"
@@ -96,8 +96,8 @@ jobs:
         shell: bash
         run: |
           gh release create "${{ steps.version.outputs.tag }}" \
-            --title "DS5 NS2Pro Dongle Manager ${{ steps.version.outputs.version }}" \
-            --notes "Windows manager for DS5_NS2Pro_Dongle." \
+            --title "DS5 Dongle Manager ${{ steps.version.outputs.version }}" \
+            --notes "Windows manager for DS5Dongle_switch2 (switch-v3 or later): https://github.com/DoorWarning/DS5Dongle_switch2" \
             --target "${{ github.sha }}" \
             --repo "${{ github.repository }}" \
             || true
