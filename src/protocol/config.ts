@@ -1,6 +1,6 @@
 // Mirrors Config_body in ds5_dongle/src/config.h (packed, little-endian).
 // Field order and ranges follow ds5_dongle/tools/config_tool.py FIELDS and config_valid().
-export const CONFIG_BODY_SIZE = 23;
+export const CONFIG_BODY_SIZE = 22;
 export const FEATURE_REPORT_PAYLOAD_SIZE = 63;
 export const CONFIG_VERSION = 5;
 export const STATUS_GPIO_DISABLED = 255;
