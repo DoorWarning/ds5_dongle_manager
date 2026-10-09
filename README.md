@@ -1,73 +1,73 @@
-# DS5 NS2Pro Dongle Manager
+# DS5 Dongle Manager
 
-[简体中文](README.zh-CN.md)
+[한국어](README.ko.md) · [简体中文](README.zh-CN.md)
 
-Desktop manager for [DS5_NS2Pro_Dongle](https://github.com/AizawaHikaru233/DS5_NS2Pro_Dongle). It is a Tauri + React application used to configure the Pico firmware, inspect connection status, manage NS2Pro pairing, and forward wired NS2Pro input when the firmware needs a PC-side bridge.
+Windows desktop manager for the **DS5Dongle Switch fork**, [DoorWarning/DS5Dongle_switch2](https://github.com/DoorWarning/DS5Dongle_switch2). The fork is a Pico 2 W receiver that connects a DualSense to a PC (as a DualSense) or to a Switch 2 (as a wired Pro Controller).
+
+The app is a Tauri + React application, forked from [AizawaHikaru233/DS5-NS2Pro-Dongle-Manager](https://github.com/AizawaHikaru233/DS5-NS2Pro-Dongle-Manager). The NS2Pro parts were removed and replaced with this firmware's features.
+
+## Features
+
+- **Finds the dongle in both modes.** In PC mode it appears as a DualSense (`054C:0CE6` / `0DF2`); in NS mode it appears as a Pro Controller (`057E:2009`).
+- **Switches between PC and NS mode** with a click, without the controller combo. The dongle saves the mode and reboots, and the app reconnects.
+- **PC mode settings:**
+  - controller type (DS5 / DSE / Auto) and USB serial number;
+  - polling rate;
+  - haptics strength, adaptive trigger reduction and haptics buffer;
+  - speaker and microphone routing, speaker gain and volume lock;
+  - waking the PC with PS, and opening Xbox Game Bar with PS;
+  - idle disconnect and the Pico LED;
+  - status GPIO.
+- **NS mode settings**, saved on the dongle as you edit:
+  - vibration strength in 1 % steps;
+  - 4 trigger modes, each with its own L2/R2 adaptive trigger effect (preset, typed parameters or the raw 11 bytes) and the point where ZL/ZR fire;
+  - saved trigger patterns;
+  - turbo buttons (○✕△□, L1/R1/L2/R2) and turbo speed;
+  - a macro editor for the 4 slots. Each step has a time, buttons and both sticks; steps can be added, inserted, duplicated, moved and deleted.
+- **Switch 2 wake beacon:** shows whether it is learned, and starts learning or forgets it.
+- Shows the DualSense battery and signal, with low-battery and connection notifications, a tray icon and autostart.
+- Checks GitHub for new versions of the app and the firmware.
+
+The controller shortcuts (Mute + D-pad, Mute + double tap and so on) change the same NS settings, and the app follows those changes.
+
+## Requirements
+
+- Firmware **`switch-v3` or later** from [DS5Dongle_switch2 releases](https://github.com/DoorWarning/DS5Dongle_switch2/releases).
+  - Older firmware still shows status and PC settings, but cannot switch modes or edit NS settings.
+- NS settings and macros can only be edited while the dongle is **in NS mode and plugged into the PC**. Switch modes from the app, edit, then move the dongle back to the dock.
+- Windows 10/11 with the WebView2 Runtime.
 
 ## Install
 
-1. Download the latest `DS5 NS2Pro Dongle Manager_*.msi` from [Releases](https://github.com/AizawaHikaru233/DS5-NS2Pro-Dongle-Manager/releases).
-2. Install the MSI.
-3. Flash the matching firmware from the firmware repository.
-4. Connect the Pico dongle and open the manager.
-
-## What This App Does
-
-- Shows Pico firmware version, signal and controller connection state.
-- Sends firmware configuration through the Pico manager HID protocol.
-- Starts NS2Pro wired pairing and NS2Pro Bluetooth pairing flows.
-- Keeps NS2Pro-specific settings separated from DS5 settings where the firmware exposes separate behavior.
-- Provides a minimal PC-side bridge for wired NS2Pro input when needed.
-
-## Difference From DS5Dongle
-
-This repository is not a replacement frontend for upstream DS5Dongle. It is a manager for the DS5 + NS2Pro fork:
-
-- Upstream DS5Dongle focuses on making a DualSense controller appear as a wired DualSense through a Pico.
-- This project also supports NS2Pro input translated to a DualSense-compatible USB device.
-- NS2Pro input, gyro, rumble style, pairing and profile behavior are managed separately from the original DS5 path as much as the firmware allows.
-- The desktop app stays lightweight; DS5 report generation, NS2Pro translation, gyro calibration and haptic conversion are handled in firmware.
-
-## Build Requirements
-
-- Windows 10/11
-- Node.js 24
-- pnpm 11
-- Rust stable MSVC toolchain
-- Visual Studio Build Tools or Visual Studio with C++ build tools
-- WebView2 Runtime
+1. Download the latest `.msi` from [Releases](https://github.com/DoorWarning/ds5_dongle_manager/releases).
+2. Install it.
+3. Plug in the dongle and open **DS5 Dongle Manager**.
 
 ## Build
 
+Requirements: Node.js 24, pnpm, the Rust stable MSVC toolchain, and Visual Studio C++ build tools.
+
 ```powershell
 pnpm install
-pnpm build:msi
+pnpm tauri dev     # run in development mode
+pnpm build:msi     # MSI in src-tauri/target/release/bundle/msi/
 ```
 
-The MSI is written to:
+Pushing a tag `v*` (for example `v1.0.0`) runs the `Release manager` workflow, which builds the MSI and attaches it to a GitHub release.
 
-```text
-src-tauri/target/release/bundle/msi/
-```
+## How it talks to the dongle
 
-## One-Click Release
+- **PC mode:** the original web config Feature reports `0xF6`–`0xF9` for the PC settings, and the vendor Feature report `0xFA` for the companion protocol.
+- **NS mode:** Pro Controller output report `0x01` with subcommand `0xE0`. The reply comes back in the `0x21` subcommand reply.
+- Companion requests are `[cmd, seq, len, payload]` and replies are `[cmd, seq, status, len, data]`; see `src/companion.cpp` in the firmware.
 
-GitHub Actions includes `Release manager`.
+## Credits
 
-1. Open Actions.
-2. Select `Release manager`.
-3. Run workflow.
-4. Enter a version such as `1.0.0`.
-
-The workflow creates or updates release tag `v1.0.0`, builds the Windows MSI, and uploads it to the GitHub Release.
-
-## References
-
-- Firmware: [AizawaHikaru233/DS5_NS2Pro_Dongle](https://github.com/AizawaHikaru233/DS5_NS2Pro_Dongle)
-- Original manager base: [GooGuJiang/ds5dongle-manager](https://github.com/GooGuJiang/ds5dongle-manager)
-- Original firmware base: [awalol/DS5Dongle](https://github.com/awalol/DS5Dongle)
-- NS2Pro bridge reference: [LeonChrome/y700-switch2-pro-bridge](https://github.com/LeonChrome/y700-switch2-pro-bridge)
+- Manager base: [GooGuJiang/ds5dongle-manager](https://github.com/GooGuJiang/ds5dongle-manager) and [AizawaHikaru233/DS5-NS2Pro-Dongle-Manager](https://github.com/AizawaHikaru233/DS5-NS2Pro-Dongle-Manager) (MIT)
+- Firmware: [awalol/DS5Dongle](https://github.com/awalol/DS5Dongle); Switch Pro mode from [Demogorgon314/DS5Dongle](https://github.com/Demogorgon314/DS5Dongle)
 
 ## License
 
-MIT. Attribution is kept for code derived from upstream projects.
+MIT. The upstream copyright notices are kept in [LICENSE](LICENSE).
+
+Unofficial project, not affiliated with Nintendo or Sony.

@@ -1,6 +1,6 @@
 [package]
 name = "ds5_dongle_manager"
-version = "1.0.0"
+version = "2.0.0"
 description = "Desktop manager for the DS5Dongle Switch fork (Pico 2 W DualSense dongle, PC and Switch Pro modes)."
 authors = ["DoorWarning"]
 edition = "2021"
