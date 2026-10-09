@@ -138,8 +138,9 @@ function normalizeCurrentVersion(version: string): string {
   return normalized;
 }
 
+// Our release tags look like "switch-v2"; plain semantic versions still work.
 function isLikelyFirmwareVersion(version: string): boolean {
-  return /^\d{3}$/.test(version) || /^v?\d+(?:\.\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?$/i.test(version);
+  return /v?\d+(?:\.\d+){0,3}/i.test(version) && version !== "dev";
 }
 
 function normalizeFirmwareUpdateResult(result: Partial<FirmwareUpdateCheckResult> | GitHubRelease, currentVersion: string): FirmwareUpdateCheckResult {
@@ -219,7 +220,7 @@ function compareFirmwareVersions(left: string, right: string): number {
 }
 
 function parseFirmwareVersionParts(version: string): number[] {
-  const match = version.trim().match(/^v?(\d+(?:\.\d+){0,3})/i);
+  const match = version.trim().match(/v?(\d+(?:\.\d+){0,3})(?!.*\d)/i);
   return match ? match[1].split(".").map((part) => Number(part) || 0) : [0];
 }
 

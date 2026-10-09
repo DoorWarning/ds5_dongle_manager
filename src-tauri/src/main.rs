@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    ds5_ns2pro_dongle_manager_lib::run()
+    ds5_dongle_manager_lib::run()
 }

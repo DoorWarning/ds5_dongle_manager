@@ -1,85 +1,91 @@
-export const CONFIG_BODY_SIZE = 33;
+// Mirrors Config_body in ds5_dongle/src/config.h (packed, little-endian).
+// Field order and ranges follow ds5_dongle/tools/config_tool.py FIELDS and config_valid().
+export const CONFIG_BODY_SIZE = 23;
 export const FEATURE_REPORT_PAYLOAD_SIZE = 63;
-export const CONFIG_VERSION = 8;
+export const CONFIG_VERSION = 5;
+export const STATUS_GPIO_DISABLED = 255;
 
 export type PollingRateMode = 0 | 1 | 2;
-export type ControllerMode = 0 | 1 | 2;
-export type Ns2ProRumbleStyle = 0 | 1;
+export type ControllerMode = 0 | 1 | 2 | 3;
+export type AudioSelect = 0 | 1 | 2 | 3;
+export type StatusGpioMode = 0 | 1;
 
 export interface ConfigBody {
   configVersion: number;
-  ds5HapticsGain: number;
+  hapticsGain: number;
   speakerVolume: number;
+  headsetVolume: number;
+  speakerGain: number;
   inactiveTime: number;
-  disableInactiveDisconnect: boolean;
   disablePicoLed: boolean;
   pollingRateMode: PollingRateMode;
-  hapticsBufferLength: number;
+  audioBufferLength: number;
   controllerMode: ControllerMode;
-  ns2proRumbleGain: number;
-  ns2proRumbleStyle: Ns2ProRumbleStyle;
-  ns2proBleHasTarget: boolean;
-  ns2proBleAddressType: 0 | 1;
-  ns2proBleAddress: [number, number, number, number, number, number];
-  ds5LeftStickDeadzonePercent: number;
-  ds5RightStickDeadzonePercent: number;
-  ns2proLeftStickDeadzonePercent: number;
-  ns2proRightStickDeadzonePercent: number;
-  ns2proAutoStickCenter: boolean;
+  enableUsbSn: boolean;
+  psShortcutEnabled: boolean;
+  micSelect: AudioSelect;
+  speakerSelect: AudioSelect;
+  enableWake: boolean;
+  triggerReduce: number;
+  lockVolume: boolean;
+  statusGpioPin: number;
+  statusGpioMode: StatusGpioMode;
 }
 
 export interface ConfigValidationIssue {
   field: keyof ConfigBody;
 }
 
+// Values config_valid() falls back to after a reset (body memset to 0xFF).
 export const DEFAULT_CONFIG: ConfigBody = {
   configVersion: CONFIG_VERSION,
-  ds5HapticsGain: 1,
-  speakerVolume: 0,
+  hapticsGain: 1,
+  speakerVolume: 100,
+  headsetVolume: 100,
+  speakerGain: 2,
   inactiveTime: 30,
-  disableInactiveDisconnect: false,
   disablePicoLed: false,
-  pollingRateMode: 0,
-  hapticsBufferLength: 64,
+  pollingRateMode: 1,
+  audioBufferLength: 48,
   controllerMode: 2,
-  ns2proRumbleGain: 1,
-  ns2proRumbleStyle: 1,
-  ns2proBleHasTarget: false,
-  ns2proBleAddressType: 0,
-  ns2proBleAddress: [0, 0, 0, 0, 0, 0],
-  ds5LeftStickDeadzonePercent: 3,
-  ds5RightStickDeadzonePercent: 0,
-  ns2proLeftStickDeadzonePercent: 3,
-  ns2proRightStickDeadzonePercent: 0,
-  ns2proAutoStickCenter: true,
+  enableUsbSn: false,
+  psShortcutEnabled: false,
+  micSelect: 0,
+  speakerSelect: 0,
+  enableWake: false,
+  triggerReduce: 0,
+  lockVolume: false,
+  statusGpioPin: STATUS_GPIO_DISABLED,
+  statusGpioMode: 0,
 };
 
-export const POLLING_RATE_OPTIONS: Array<{
-  value: PollingRateMode;
-  label: string;
-}> = [
+export const POLLING_RATE_OPTIONS: Array<{ value: PollingRateMode; label: string }> = [
   { value: 0, label: "250 Hz" },
   { value: 1, label: "500 Hz" },
-  { value: 2, label: "1000 Hz" },
+  { value: 2, label: "Real-time" },
 ];
 
-export const CONTROLLER_MODE_OPTIONS: Array<{
-  value: ControllerMode;
-}> = [
+// Mode 3 (Switch Pro) is switched through the companion SET_MODE command, not here.
+export const CONTROLLER_MODE_OPTIONS: Array<{ value: ControllerMode }> = [
   { value: 0 },
   { value: 1 },
   { value: 2 },
 ];
 
+export const AUDIO_SELECT_OPTIONS: AudioSelect[] = [0, 1, 2, 3];
+
+// GPIOs the Pico 2 W leaves free (0/1 UART, 23-25 CYW43, 29 VSYS are reserved).
+export const STATUS_GPIO_PINS: number[] = [
+  2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 26, 27, 28,
+];
+
 export function decodeConfigBody(source: ArrayBuffer | DataView | Uint8Array): ConfigBody {
   const bytes = toUint8Array(source);
-  const candidates = configBodyOffsets(bytes.byteLength);
-  const parsed = candidates
-    .map((offset) => {
-      const config = decodeAt(bytes, offset);
-      return config ? { offset, config, issues: validateConfig(config) } : null;
-    })
-    .filter(Boolean) as Array<{ offset: number; config: ConfigBody; issues: ConfigValidationIssue[] }>;
+  const candidates = configBodyOffsets(bytes);
+  const parsed = candidates.map((offset) => {
+    const config = decodeAt(bytes, offset);
+    return { offset, config, issues: validateConfig(config) };
+  });
   const valid = parsed.find((candidate) => candidate.issues.length === 0);
 
   if (valid) {
@@ -90,10 +96,6 @@ export function decodeConfigBody(source: ArrayBuffer | DataView | Uint8Array): C
     throw new ConfigDecodeError("invalidConfig", {
       issues: parsed[0].issues.map((issue) => issue.field),
       offset: parsed[0].offset,
-      candidates: parsed.map(({ offset, issues }) => ({
-        offset,
-        issues: issues.map((issue) => issue.field),
-      })),
       rawHex: bytesToHex(bytes),
     });
   }
@@ -115,122 +117,78 @@ export function encodeConfigBody(config: ConfigBody): Uint8Array<ArrayBuffer> {
   const bytes = new Uint8Array(new ArrayBuffer(CONFIG_BODY_SIZE));
   const view = new DataView(bytes.buffer);
   view.setUint8(0, config.configVersion);
-  view.setFloat32(1, config.ds5HapticsGain, true);
-  view.setFloat32(5, config.speakerVolume, true);
-  view.setUint8(9, config.inactiveTime);
-  view.setUint8(10, config.disableInactiveDisconnect ? 1 : 0);
-  view.setUint8(11, config.disablePicoLed ? 1 : 0);
-  view.setUint8(12, config.pollingRateMode);
-  view.setUint8(13, config.hapticsBufferLength);
-  view.setUint8(14, config.controllerMode);
-  view.setFloat32(15, config.ns2proRumbleGain, true);
-  view.setUint8(19, config.ns2proRumbleStyle);
-  view.setUint8(20, config.ns2proBleHasTarget ? 1 : 0);
-  view.setUint8(21, config.ns2proBleAddressType);
-  config.ns2proBleAddress.forEach((byte, index) => view.setUint8(22 + index, byte));
-  view.setUint8(28, config.ds5LeftStickDeadzonePercent);
-  view.setUint8(29, config.ds5RightStickDeadzonePercent);
-  view.setUint8(30, config.ns2proLeftStickDeadzonePercent);
-  view.setUint8(31, config.ns2proRightStickDeadzonePercent);
-  view.setUint8(32, config.ns2proAutoStickCenter ? 1 : 0);
+  view.setFloat32(1, config.hapticsGain, true);
+  view.setUint8(5, config.speakerVolume);
+  view.setUint8(6, config.headsetVolume);
+  view.setUint8(7, config.speakerGain);
+  view.setUint8(8, config.inactiveTime);
+  view.setUint8(9, config.disablePicoLed ? 1 : 0);
+  view.setUint8(10, config.pollingRateMode);
+  view.setUint8(11, config.audioBufferLength);
+  view.setUint8(12, config.controllerMode);
+  view.setUint8(13, config.enableUsbSn ? 1 : 0);
+  view.setUint8(14, config.psShortcutEnabled ? 1 : 0);
+  view.setUint8(15, config.micSelect);
+  view.setUint8(16, config.speakerSelect);
+  view.setUint8(17, config.enableWake ? 1 : 0);
+  view.setUint8(18, config.triggerReduce);
+  view.setUint8(19, config.lockVolume ? 1 : 0);
+  view.setUint8(20, config.statusGpioPin);
+  view.setUint8(21, config.statusGpioMode);
   return bytes;
 }
 
 export function validateConfig(config: ConfigBody): ConfigValidationIssue[] {
   const issues: ConfigValidationIssue[] = [];
+  const check = (field: keyof ConfigBody, ok: boolean) => {
+    if (!ok) {
+      issues.push({ field });
+    }
+  };
+  const intIn = (value: number, min: number, max: number) => Number.isInteger(value) && value >= min && value <= max;
 
-  if (!Number.isInteger(config.configVersion) || config.configVersion < 0 || config.configVersion > 255) {
-    issues.push({ field: "configVersion" });
-  }
-
-  if (!Number.isFinite(config.ds5HapticsGain) || config.ds5HapticsGain < 0 || config.ds5HapticsGain > 2) {
-    issues.push({ field: "ds5HapticsGain" });
-  }
-
-  if (!Number.isFinite(config.speakerVolume) || config.speakerVolume < -100 || config.speakerVolume > 0) {
-    issues.push({ field: "speakerVolume" });
-  }
-
-  if (!Number.isInteger(config.inactiveTime) || config.inactiveTime < 5 || config.inactiveTime > 60) {
-    issues.push({ field: "inactiveTime" });
-  }
-
-  if (!Number.isInteger(config.pollingRateMode) || config.pollingRateMode < 0 || config.pollingRateMode > 2) {
-    issues.push({ field: "pollingRateMode" });
-  }
-
-  if (
-    !Number.isInteger(config.hapticsBufferLength) ||
-    config.hapticsBufferLength < 16 ||
-    config.hapticsBufferLength > 128
-  ) {
-    issues.push({ field: "hapticsBufferLength" });
-  }
-
-  if (!Number.isInteger(config.controllerMode) || config.controllerMode < 0 || config.controllerMode > 2) {
-    issues.push({ field: "controllerMode" });
-  }
-
-  if (!Number.isFinite(config.ns2proRumbleGain) || config.ns2proRumbleGain < 0 || config.ns2proRumbleGain > 2) {
-    issues.push({ field: "ns2proRumbleGain" });
-  }
-
-  if (!Number.isInteger(config.ns2proRumbleStyle) || config.ns2proRumbleStyle < 0 || config.ns2proRumbleStyle > 1) {
-    issues.push({ field: "ns2proRumbleStyle" });
-  }
-
-  if (!Number.isInteger(config.ns2proBleAddressType) || config.ns2proBleAddressType < 0 || config.ns2proBleAddressType > 1) {
-    issues.push({ field: "ns2proBleAddressType" });
-  }
-
-  if (
-    !Array.isArray(config.ns2proBleAddress) ||
-    config.ns2proBleAddress.length !== 6 ||
-    config.ns2proBleAddress.some((byte) => !Number.isInteger(byte) || byte < 0 || byte > 255)
-  ) {
-    issues.push({ field: "ns2proBleAddress" });
-  }
-
-  if (!Number.isInteger(config.ds5LeftStickDeadzonePercent) || config.ds5LeftStickDeadzonePercent < 0 || config.ds5LeftStickDeadzonePercent > 30) {
-    issues.push({ field: "ds5LeftStickDeadzonePercent" });
-  }
-
-  if (!Number.isInteger(config.ds5RightStickDeadzonePercent) || config.ds5RightStickDeadzonePercent < 0 || config.ds5RightStickDeadzonePercent > 30) {
-    issues.push({ field: "ds5RightStickDeadzonePercent" });
-  }
-
-  if (!Number.isInteger(config.ns2proLeftStickDeadzonePercent) || config.ns2proLeftStickDeadzonePercent < 0 || config.ns2proLeftStickDeadzonePercent > 30) {
-    issues.push({ field: "ns2proLeftStickDeadzonePercent" });
-  }
-
-  if (!Number.isInteger(config.ns2proRightStickDeadzonePercent) || config.ns2proRightStickDeadzonePercent < 0 || config.ns2proRightStickDeadzonePercent > 30) {
-    issues.push({ field: "ns2proRightStickDeadzonePercent" });
-  }
+  check("configVersion", config.configVersion === CONFIG_VERSION);
+  check("hapticsGain", Number.isFinite(config.hapticsGain) && config.hapticsGain >= 1 && config.hapticsGain <= 2);
+  check("speakerVolume", intIn(config.speakerVolume, 0, 127));
+  check("headsetVolume", intIn(config.headsetVolume, 0, 127));
+  check("speakerGain", intIn(config.speakerGain, 0, 7));
+  check("inactiveTime", intIn(config.inactiveTime, 0, 60));
+  check("pollingRateMode", intIn(config.pollingRateMode, 0, 2));
+  check("audioBufferLength", intIn(config.audioBufferLength, 16, 128));
+  check("controllerMode", intIn(config.controllerMode, 0, 3));
+  check("micSelect", intIn(config.micSelect, 0, 3));
+  check("speakerSelect", intIn(config.speakerSelect, 0, 3));
+  check("triggerReduce", intIn(config.triggerReduce, 0, 10));
+  check(
+    "statusGpioPin",
+    config.statusGpioPin === STATUS_GPIO_DISABLED || STATUS_GPIO_PINS.includes(config.statusGpioPin),
+  );
+  check("statusGpioMode", intIn(config.statusGpioMode, 0, 1));
 
   return issues;
 }
 
 export function normalizeConfig(config: ConfigBody): ConfigBody {
   return {
-    configVersion: clampInteger(config.configVersion ?? CONFIG_VERSION, 0, 255),
-    ds5HapticsGain: clampToStep(config.ds5HapticsGain, 0, 2, 0.01),
-    speakerVolume: clampToStep(config.speakerVolume, -100, 0, 0.01),
-    inactiveTime: clampInteger(config.inactiveTime, 5, 60),
-    disableInactiveDisconnect: Boolean(config.disableInactiveDisconnect),
+    configVersion: CONFIG_VERSION,
+    hapticsGain: clampToStep(config.hapticsGain, 1, 2, 0.01),
+    speakerVolume: clampInteger(config.speakerVolume, 0, 127),
+    headsetVolume: clampInteger(config.headsetVolume, 0, 127),
+    speakerGain: clampInteger(config.speakerGain, 0, 7),
+    inactiveTime: clampInteger(config.inactiveTime, 0, 60),
     disablePicoLed: Boolean(config.disablePicoLed),
     pollingRateMode: clampInteger(config.pollingRateMode, 0, 2) as PollingRateMode,
-    hapticsBufferLength: clampInteger(config.hapticsBufferLength, 16, 128),
-    controllerMode: clampInteger(config.controllerMode, 0, 2) as ControllerMode,
-    ns2proRumbleGain: clampToStep(config.ns2proRumbleGain, 0, 2, 0.01),
-    ns2proRumbleStyle: clampInteger(config.ns2proRumbleStyle, 0, 1) as Ns2ProRumbleStyle,
-    ns2proBleHasTarget: Boolean(config.ns2proBleHasTarget),
-    ns2proBleAddressType: clampInteger(config.ns2proBleAddressType, 0, 1) as 0 | 1,
-    ns2proBleAddress: normalizeBleAddress(config.ns2proBleAddress),
-    ds5LeftStickDeadzonePercent: clampInteger(config.ds5LeftStickDeadzonePercent, 0, 30),
-    ds5RightStickDeadzonePercent: clampInteger(config.ds5RightStickDeadzonePercent, 0, 30),
-    ns2proLeftStickDeadzonePercent: clampInteger(config.ns2proLeftStickDeadzonePercent, 0, 30),
-    ns2proRightStickDeadzonePercent: clampInteger(config.ns2proRightStickDeadzonePercent, 0, 30),
-    ns2proAutoStickCenter: Boolean(config.ns2proAutoStickCenter),
+    audioBufferLength: clampInteger(config.audioBufferLength, 16, 128),
+    controllerMode: clampInteger(config.controllerMode, 0, 3) as ControllerMode,
+    enableUsbSn: Boolean(config.enableUsbSn),
+    psShortcutEnabled: Boolean(config.psShortcutEnabled),
+    micSelect: clampInteger(config.micSelect, 0, 3) as AudioSelect,
+    speakerSelect: clampInteger(config.speakerSelect, 0, 3) as AudioSelect,
+    enableWake: Boolean(config.enableWake),
+    triggerReduce: clampInteger(config.triggerReduce, 0, 10),
+    lockVolume: Boolean(config.lockVolume),
+    statusGpioPin: STATUS_GPIO_PINS.includes(config.statusGpioPin) ? config.statusGpioPin : STATUS_GPIO_DISABLED,
+    statusGpioMode: clampInteger(config.statusGpioMode, 0, 1) as StatusGpioMode,
   };
 }
 
@@ -239,26 +197,8 @@ export function configsEqual(left: ConfigBody | null, right: ConfigBody | null):
     return left === right;
   }
 
-  return (
-    left.configVersion === right.configVersion &&
-    Math.abs(left.ds5HapticsGain - right.ds5HapticsGain) < 0.001 &&
-    Math.abs(left.speakerVolume - right.speakerVolume) < 0.001 &&
-    left.inactiveTime === right.inactiveTime &&
-    left.disableInactiveDisconnect === right.disableInactiveDisconnect &&
-    left.disablePicoLed === right.disablePicoLed &&
-    left.pollingRateMode === right.pollingRateMode &&
-    left.hapticsBufferLength === right.hapticsBufferLength &&
-    left.controllerMode === right.controllerMode &&
-    Math.abs(left.ns2proRumbleGain - right.ns2proRumbleGain) < 0.001 &&
-    left.ns2proRumbleStyle === right.ns2proRumbleStyle &&
-    left.ns2proBleHasTarget === right.ns2proBleHasTarget &&
-    left.ns2proBleAddressType === right.ns2proBleAddressType &&
-    left.ns2proBleAddress.every((byte, index) => byte === right.ns2proBleAddress[index]) &&
-    left.ds5LeftStickDeadzonePercent === right.ds5LeftStickDeadzonePercent &&
-    left.ds5RightStickDeadzonePercent === right.ds5RightStickDeadzonePercent &&
-    left.ns2proLeftStickDeadzonePercent === right.ns2proLeftStickDeadzonePercent &&
-    left.ns2proRightStickDeadzonePercent === right.ns2proRightStickDeadzonePercent &&
-    left.ns2proAutoStickCenter === right.ns2proAutoStickCenter
+  return (Object.keys(left) as Array<keyof ConfigBody>).every((key) =>
+    key === "hapticsGain" ? Math.abs(left.hapticsGain - right.hapticsGain) < 0.001 : left[key] === right[key],
   );
 }
 
@@ -279,57 +219,44 @@ export class ConfigDecodeError extends Error {
   }
 }
 
-function decodeAt(bytes: Uint8Array, offset: number): ConfigBody | null {
-  if (bytes.byteLength - offset < CONFIG_BODY_SIZE) {
-    return null;
-  }
-
+function decodeAt(bytes: Uint8Array, offset: number): ConfigBody {
   const view = new DataView(bytes.buffer, bytes.byteOffset + offset, CONFIG_BODY_SIZE);
   return {
     configVersion: view.getUint8(0),
-    ds5HapticsGain: view.getFloat32(1, true),
-    speakerVolume: view.getFloat32(5, true),
-    inactiveTime: view.getUint8(9),
-    disableInactiveDisconnect: view.getUint8(10) === 1,
-    disablePicoLed: view.getUint8(11) === 1,
-    pollingRateMode: view.getUint8(12) as PollingRateMode,
-    hapticsBufferLength: view.getUint8(13),
-    controllerMode: view.getUint8(14) as ControllerMode,
-    ns2proRumbleGain: view.getFloat32(15, true),
-    ns2proRumbleStyle: view.getUint8(19) as Ns2ProRumbleStyle,
-    ns2proBleHasTarget: view.getUint8(20) === 1,
-    ns2proBleAddressType: view.getUint8(21) as 0 | 1,
-    ns2proBleAddress: [
-      view.getUint8(22),
-      view.getUint8(23),
-      view.getUint8(24),
-      view.getUint8(25),
-      view.getUint8(26),
-      view.getUint8(27),
-    ],
-    ds5LeftStickDeadzonePercent: view.getUint8(28),
-    ds5RightStickDeadzonePercent: view.getUint8(29),
-    ns2proLeftStickDeadzonePercent: view.getUint8(30),
-    ns2proRightStickDeadzonePercent: view.getUint8(31),
-    ns2proAutoStickCenter: view.getUint8(32) === 1,
+    hapticsGain: view.getFloat32(1, true),
+    speakerVolume: view.getUint8(5),
+    headsetVolume: view.getUint8(6),
+    speakerGain: view.getUint8(7),
+    inactiveTime: view.getUint8(8),
+    disablePicoLed: view.getUint8(9) === 1,
+    pollingRateMode: view.getUint8(10) as PollingRateMode,
+    audioBufferLength: view.getUint8(11),
+    controllerMode: view.getUint8(12) as ControllerMode,
+    enableUsbSn: view.getUint8(13) === 1,
+    psShortcutEnabled: view.getUint8(14) === 1,
+    micSelect: view.getUint8(15) as AudioSelect,
+    speakerSelect: view.getUint8(16) as AudioSelect,
+    enableWake: view.getUint8(17) === 1,
+    triggerReduce: view.getUint8(18),
+    lockVolume: view.getUint8(19) === 1,
+    statusGpioPin: view.getUint8(20),
+    statusGpioMode: view.getUint8(21) as StatusGpioMode,
   };
 }
 
-function configBodyOffsets(byteLength: number): number[] {
-  if (byteLength < CONFIG_BODY_SIZE) {
-    return [];
+// hidapi returns the report id first; tolerate payloads with or without it.
+function configBodyOffsets(bytes: Uint8Array): number[] {
+  const offsets: number[] = [];
+  if (bytes.byteLength >= CONFIG_BODY_SIZE + 1 && bytes[0] === 0xf7) {
+    offsets.push(1);
   }
-
-  const offsets = new Set<number>([0]);
-  if (byteLength >= CONFIG_BODY_SIZE + 1) {
-    offsets.add(1);
+  if (bytes.byteLength >= CONFIG_BODY_SIZE) {
+    offsets.push(0);
   }
-
-  for (let offset = 2; offset <= byteLength - CONFIG_BODY_SIZE; offset += 1) {
-    offsets.add(offset);
+  if (bytes.byteLength >= CONFIG_BODY_SIZE + 1 && !offsets.includes(1)) {
+    offsets.push(1);
   }
-
-  return [...offsets];
+  return offsets;
 }
 
 function toUint8Array(source: ArrayBuffer | DataView | Uint8Array): Uint8Array {
@@ -344,24 +271,12 @@ function toUint8Array(source: ArrayBuffer | DataView | Uint8Array): Uint8Array {
   return new Uint8Array(source);
 }
 
-function roundToStep(value: number, step: number): number {
-  return Math.round(value / step) * step;
-}
-
 function clampInteger(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Math.round(value)));
 }
 
 function clampToStep(value: number, min: number, max: number, step: number): number {
-  return Math.min(max, Math.max(min, roundToStep(value, step)));
-}
-
-function normalizeBleAddress(address: ConfigBody["ns2proBleAddress"]): ConfigBody["ns2proBleAddress"] {
-  if (!Array.isArray(address) || address.length !== 6) {
-    return [0, 0, 0, 0, 0, 0];
-  }
-
-  return address.map((byte) => clampInteger(byte, 0, 255)) as ConfigBody["ns2proBleAddress"];
+  return Math.min(max, Math.max(min, Math.round(value / step) * step));
 }
 
 function bytesToHex(bytes: Uint8Array): string {

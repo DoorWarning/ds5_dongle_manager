@@ -5,9 +5,10 @@ use std::ffi::CString;
 const SONY_VENDOR_ID: u16 = 0x054c;
 const DUALSENSE_PRODUCT_ID: u16 = 0x0ce6;
 const DUALSENSE_EDGE_PRODUCT_ID: u16 = 0x0df2;
-const PICO_MANAGER_VENDOR_ID: u16 = 0x2e8a;
-const PICO_MANAGER_PRODUCT_ID: u16 = 0x00d5;
 const SUPPORTED_PRODUCT_IDS: [u16; 2] = [DUALSENSE_PRODUCT_ID, DUALSENSE_EDGE_PRODUCT_ID];
+// NS mode: the dongle enumerates as a wired Switch Pro Controller.
+const NINTENDO_VENDOR_ID: u16 = 0x057e;
+const SWITCH_PRO_PRODUCT_ID: u16 = 0x2009;
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -30,9 +31,9 @@ pub fn collect_supported_devices(api: &HidApi) -> Vec<HidDeviceInfoDto> {
     for device in api.device_list() {
         let is_dualsense = device.vendor_id() == SONY_VENDOR_ID
             && SUPPORTED_PRODUCT_IDS.contains(&device.product_id());
-        let is_manager = device.vendor_id() == PICO_MANAGER_VENDOR_ID
-            && device.product_id() == PICO_MANAGER_PRODUCT_ID;
-        if !is_dualsense && !is_manager {
+        let is_switch_pro = device.vendor_id() == NINTENDO_VENDOR_ID
+            && device.product_id() == SWITCH_PRO_PRODUCT_ID;
+        if !is_dualsense && !is_switch_pro {
             continue;
         }
 

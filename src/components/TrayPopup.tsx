@@ -65,7 +65,7 @@ export function TrayPopup() {
 
   return (
     <main className="tray-popup-shell">
-      <nav className="tray-popup-menu" aria-label="DS5 NS2Pro Dongle Manager tray menu">
+      <nav className="tray-popup-menu" aria-label="DS5 Dongle Manager tray menu">
         {batteryItems.length > 0 && (
           <>
             <div className="tray-popup-status" title={batteryText}>

@@ -1,4 +1,4 @@
-import { Gamepad2, Info, Settings } from "lucide-react";
+import { Gamepad2, Info, Monitor } from "lucide-react";
 import { FaGithub } from "react-icons/fa";
 import { useTranslation } from "react-i18next";
 import {
@@ -7,7 +7,7 @@ import {
   type AppView,
 } from "@/appConfig";
 import { ConfigPanel } from "@/components/ConfigPanel";
-import { ButtonMappingPanel } from "@/components/ButtonMappingPanel";
+import { NsPanel } from "@/components/NsPanel";
 import { SidebarDeviceCard } from "@/components/SidebarDeviceCard";
 import {
   Sidebar,
@@ -23,48 +23,40 @@ import {
 } from "@/components/ui/sidebar";
 import type { FirmwareUpdateCheckResult } from "@/lib/firmwareRelease";
 import type { UseDs5BridgeResult } from "@/hooks/useDs5Bridge";
-import type { DeviceInputSource } from "@/components/DeviceStrip";
 
-const GENERAL_NAV_ITEMS = [
-  { icon: Gamepad2, labelKey: "settings.nav.mapping", view: "mappingSettings" },
-  { icon: Settings, labelKey: "settings.nav.general", view: "settings" },
+const NAV_ITEMS = [
+  { icon: Monitor, labelKey: "settings.nav.pc", view: "pcSettings" },
+  { icon: Gamepad2, labelKey: "settings.nav.ns", view: "nsSettings" },
   { icon: Info, labelKey: "settings.nav.about", view: "about" },
 ] as const satisfies ReadonlyArray<{
-  icon: typeof Settings;
+  icon: typeof Monitor;
   labelKey: string;
   view: Exclude<AppView, "home">;
 }>;
 
 interface SettingsViewProps {
   bridge: UseDs5BridgeResult;
-  selectedInputSource: DeviceInputSource;
   firmwareUpdateResult: FirmwareUpdateCheckResult | null;
   sidebarOpen: boolean;
   view: AppView;
   onFirmwareUpdateClick: () => void;
   onProgressComplete: () => void;
-  onSelectedInputSourceChange: (source: DeviceInputSource) => void;
   onSidebarOpenChange: (open: boolean) => void;
   onViewChange: (view: AppView) => void;
 }
 
 export function SettingsView({
   bridge,
-  selectedInputSource,
   firmwareUpdateResult,
   sidebarOpen,
   view,
   onFirmwareUpdateClick,
   onProgressComplete,
-  onSelectedInputSourceChange,
   onSidebarOpenChange,
   onViewChange,
 }: SettingsViewProps) {
   const { t } = useTranslation();
-  const controllerSpecificItem = selectedInputSource === "NS2Pro"
-    ? { icon: Gamepad2, labelKey: "settings.nav.ns2pro", view: "ns2proSettings" as const }
-    : { icon: Gamepad2, labelKey: "settings.nav.ds5", view: "ds5Settings" as const };
-  const navItems = [controllerSpecificItem, ...GENERAL_NAV_ITEMS];
+  const navItems = NAV_ITEMS;
 
   return (
     <SidebarProvider className="settings-page" style={SETTINGS_SIDEBAR_PROVIDER_STYLE} open={sidebarOpen} onOpenChange={onSidebarOpenChange}>
@@ -72,23 +64,14 @@ export function SettingsView({
         <SidebarContent className="settings-sidebar-content">
           <SidebarDeviceCard
             connectedDevice={bridge.client?.device ?? null}
-            selectedInputSource={selectedInputSource}
-            deviceLabel={bridge.deviceLabel}
+            dongleMode={bridge.dongleMode}
+            ds5Connected={bridge.ds5Connected}
             batteryText={bridge.batteryText}
-            ns2proBatteryText={bridge.ns2proBatteryText}
             firmwareVersion={bridge.firmwareVersion}
             signalStrength={bridge.signalStrength}
-            inputMode={bridge.inputMode}
-            inputOwner={bridge.inputOwner}
-            ds5Connected={bridge.ds5Connected}
-            ns2proConnected={bridge.ns2proConnected}
-            ns2proBleState={bridge.ns2proBleState}
-            ns2proBleHasBond={bridge.ns2proBleHasBond}
-            ns2ProPairing={bridge.ns2ProPairing}
             firmwareUpdateAvailable={Boolean(firmwareUpdateResult?.updateAvailable)}
             firmwareUpdateVersion={firmwareUpdateResult?.latestRelease.tagName}
             onFirmwareUpdateClick={onFirmwareUpdateClick}
-            onSelectedInputSourceChange={onSelectedInputSourceChange}
           />
           <SidebarGroup>
             <SidebarGroupContent>
@@ -114,14 +97,10 @@ export function SettingsView({
 
       <SidebarInset className="settings-detail">
         <div key={view} className="settings-view-transition">
-          {view === "settings" || view === "ns2proSettings" || view === "ds5Settings" ? (
-            <ConfigPanel
-              bridge={bridge}
-              page={view === "ns2proSettings" ? "ns2pro" : view === "ds5Settings" ? "ds5" : "general"}
-              onProgressComplete={onProgressComplete}
-            />
-          ) : view === "mappingSettings" ? (
-            <ButtonMappingPanel bridge={bridge} source={selectedInputSource} />
+          {view === "pcSettings" ? (
+            <ConfigPanel bridge={bridge} onProgressComplete={onProgressComplete} />
+          ) : view === "nsSettings" ? (
+            <NsPanel bridge={bridge} onProgressComplete={onProgressComplete} />
           ) : (
             <section className="panel about-panel" aria-labelledby="about-title">
               <div className="panel-title about-panel-title">

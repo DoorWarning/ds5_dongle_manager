@@ -8,7 +8,7 @@ import {
   type AppView,
 } from "./appConfig";
 import { AppHeader } from "./components/AppHeader";
-import { DeviceStrip, type DeviceInputSource } from "./components/DeviceStrip";
+import { DeviceStrip } from "./components/DeviceStrip";
 import { NoticeList } from "./components/NoticeList";
 import { useDs5Bridge } from "./hooks/useDs5Bridge";
 import { useTheme } from "./hooks/useTheme";
@@ -40,44 +40,17 @@ export default function App() {
   const [softwareUpdateResult, setSoftwareUpdateResult] = useState<SoftwareUpdateCheckResult | null>(null);
   const [softwareUpdateDialogOpen, setSoftwareUpdateDialogOpen] = useState(false);
   const [softwareSystemInfo, setSoftwareSystemInfo] = useState<SoftwareSystemInfo | null>(null);
-  const [deviceSwitching, setDeviceSwitching] = useState(false);
-  const [selectedInputSource, setSelectedInputSource] = useState<DeviceInputSource>("DS5");
-  const deviceSwitchingTimerRef = useRef<number | null>(null);
   const dismissedFirmwareUpdateKeyRef = useRef(readDismissedUpdateKey(FIRMWARE_UPDATE_DISMISSED_KEY));
   const dismissedSoftwareUpdateKeyRef = useRef(readDismissedUpdateKey(SOFTWARE_UPDATE_DISMISSED_KEY));
   const promptedFirmwareUpdateKeyRef = useRef<string | null>(null);
   const promptedSoftwareUpdateKeyRef = useRef<string | null>(null);
   const isBusy = bridge.operation !== null;
   const headerIssues = useMemo(() => bridge.issues.map((issue) => t(`validation.${issue.field}`)), [bridge.issues, t]);
-  const isSettingsView = view === "settings" || view === "mappingSettings" || view === "ns2proSettings" || view === "ds5Settings" || view === "about";
+  const isSettingsView = view !== "home";
   const handleBackHome = useCallback(() => setView("home"), []);
-  const handleOpenSettings = useCallback((source?: DeviceInputSource) => {
-    const nextSource = source ?? selectedInputSource;
-    setSelectedInputSource(nextSource);
-    setView(nextSource === "NS2Pro" ? "ns2proSettings" : "ds5Settings");
-  }, [selectedInputSource]);
-
-  useEffect(() => {
-    if (selectedInputSource === "DS5" && !bridge.ds5Connected && bridge.ns2proConnected) {
-      setSelectedInputSource("NS2Pro");
-      return;
-    }
-
-    if (selectedInputSource === "NS2Pro" && !bridge.ns2proConnected && bridge.ds5Connected) {
-      setSelectedInputSource("DS5");
-    }
-  }, [bridge.ds5Connected, bridge.ns2proConnected, selectedInputSource]);
-
-  useEffect(() => {
-    if (selectedInputSource === "NS2Pro" && view === "ds5Settings") {
-      setView("ns2proSettings");
-      return;
-    }
-
-    if (selectedInputSource === "DS5" && view === "ns2proSettings") {
-      setView("ds5Settings");
-    }
-  }, [selectedInputSource, view]);
+  const handleOpenSettings = useCallback(() => {
+    setView(bridge.dongleMode === "ns" ? "nsSettings" : "pcSettings");
+  }, [bridge.dongleMode]);
   // 进度条完成后不再切换回主页，避免回报率/手柄模式切换时 USB 重枚举造成设置页闪回主页。
   const handleProgressComplete = useCallback(() => {
     if (bridge.shouldReturnHomeRef.current && bridge.client) {
@@ -86,7 +59,7 @@ export default function App() {
   }, [bridge.client, bridge.clearReturnHome, bridge.shouldReturnHomeRef]);
 
   useEffect(() => {
-    if (!bridge.client && (view === "settings" || view === "mappingSettings" || view === "ns2proSettings" || view === "ds5Settings" || view === "about") && !bridge.shouldReturnHomeRef.current) {
+    if (!bridge.client && view !== "home" && !bridge.shouldReturnHomeRef.current) {
       setView("home");
     }
   }, [bridge.client, bridge.shouldReturnHome, view]);
@@ -101,7 +74,7 @@ export default function App() {
   }, [bridge.error, bridge.clearError]);
 
   useEffect(() => {
-    if ((view !== "settings" && view !== "ns2proSettings" && view !== "ds5Settings" && view !== "about") || !bridge.client || !shouldCheckFirmwareUpdate(bridge.firmwareVersion)) {
+    if (view === "home" || !bridge.client || !shouldCheckFirmwareUpdate(bridge.firmwareVersion)) {
       return;
     }
 
@@ -194,40 +167,6 @@ export default function App() {
     }
   }, [softwareUpdateResult]);
 
-  const handleSelectDevice = useCallback(async (device: HIDDevice) => {
-    const shouldAnimateSwitch = bridge.client?.device !== device;
-
-    if (!shouldAnimateSwitch) {
-      await bridge.connectAuthorized(device);
-      return;
-    }
-
-    if (deviceSwitchingTimerRef.current !== null) {
-      window.clearTimeout(deviceSwitchingTimerRef.current);
-      deviceSwitchingTimerRef.current = null;
-    }
-
-    setDeviceSwitching(true);
-
-    try {
-      await Promise.all([
-        bridge.connectAuthorized(device),
-        wait(180),
-      ]);
-    } finally {
-      deviceSwitchingTimerRef.current = window.setTimeout(() => {
-        setDeviceSwitching(false);
-        deviceSwitchingTimerRef.current = null;
-      }, 180);
-    }
-  }, [bridge.client, bridge.connectAuthorized]);
-
-  useEffect(() => () => {
-    if (deviceSwitchingTimerRef.current !== null) {
-      window.clearTimeout(deviceSwitchingTimerRef.current);
-    }
-  }, []);
-
   useEffect(() => {
     const mediaQuery = window.matchMedia(SETTINGS_SIDEBAR_AUTO_COLLAPSE_QUERY);
     const syncSidebarState = () => setSidebarOpen(!mediaQuery.matches);
@@ -264,7 +203,7 @@ export default function App() {
           />
         </Suspense>
       )}
-        <main className={`app-shell ${isSettingsView ? "settings-mode" : ""} ${deviceSwitching ? "is-device-switching" : ""}`}>
+        <main className={`app-shell ${isSettingsView ? "settings-mode" : ""}`}>
         <AppHeader
           theme={theme.theme}
           onThemeChange={theme.setTheme}
@@ -303,35 +242,13 @@ export default function App() {
             <NoticeList supported={bridge.supported} />
             <div className="device-stage-wrap">
               <DeviceStrip
-                authorizedDevices={bridge.authorizedDevices}
-                authorizedDeviceSerialNumber={bridge.authorizedDeviceSerialNumber}
-                authorizedDeviceBatteryText={bridge.authorizedDeviceBatteryText}
-                authorizedDeviceFirmwareVersion={bridge.authorizedDeviceFirmwareVersion}
-                authorizedDeviceSignalStrength={bridge.authorizedDeviceSignalStrength}
                 client={bridge.client}
+                dongleMode={bridge.dongleMode}
+                ds5Connected={bridge.ds5Connected}
                 batteryText={bridge.batteryText}
-                ns2proBatteryText={bridge.ns2proBatteryText}
                 firmwareVersion={bridge.firmwareVersion}
                 signalStrength={bridge.signalStrength}
-                inputMode={bridge.inputMode}
-                inputOwner={bridge.inputOwner}
-                inputOwnerPolicy={bridge.inputOwnerPolicy}
-                ds5Connected={bridge.ds5Connected}
-                ns2proConnected={bridge.ns2proConnected}
-                ns2proBleState={bridge.ns2proBleState}
-                ns2proBleLastError={bridge.ns2proBleLastError}
-                ns2proBleHasBond={bridge.ns2proBleHasBond}
-                ns2proRumbleDebug={bridge.ns2proRumbleDebug}
-                ns2ProPhysicalPathPresent={bridge.ns2ProPhysicalPathPresent}
-                ns2ProPairing={bridge.ns2ProPairing}
-                deviceSerialNumber={bridge.deviceSerialNumber}
-                deviceLabel={bridge.deviceLabel}
-                isBusy={isBusy}
                 supported={bridge.supported}
-                onConnectAuthorized={handleSelectDevice}
-                onRetryNs2ProPairing={bridge.retryNs2ProPairing}
-                onStartNs2ProBlePairing={bridge.startNs2ProBlePairing}
-                onSetInputOwner={bridge.setInputOwner}
                 onOpenSettings={handleOpenSettings}
               />
             </div>
@@ -343,13 +260,11 @@ export default function App() {
           <Suspense fallback={<section className="panel settings-detail" aria-busy="true" />}>
             <SettingsView
               bridge={bridge}
-              selectedInputSource={selectedInputSource}
               firmwareUpdateResult={firmwareUpdateResult}
               sidebarOpen={sidebarOpen}
               view={view}
               onFirmwareUpdateClick={handleOpenFirmwareUpdateDialog}
               onProgressComplete={handleProgressComplete}
-              onSelectedInputSourceChange={setSelectedInputSource}
               onSidebarOpenChange={setSidebarOpen}
               onViewChange={setView}
             />
@@ -386,8 +301,4 @@ function writeDismissedUpdateKey(storageKey: string, updateKey: string): void {
   } catch {
     // Ignore storage failures; the in-memory ref still prevents repeated prompts in this session.
   }
-}
-
-function wait(ms: number): Promise<void> {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }

@@ -1,10 +1,10 @@
 [package]
-name = "ds5_ns2pro_dongle_manager"
+name = "ds5_dongle_manager"
 version = "1.0.0"
-description = "A desktop manager for a Pico-based DS5 and NS2Pro dongle bridge."
-authors = ["you"]
+description = "Desktop manager for the DS5Dongle Switch fork (Pico 2 W DualSense dongle, PC and Switch Pro modes)."
+authors = ["DoorWarning"]
 edition = "2021"
-default-run = "ds5_ns2pro_dongle_manager"
+default-run = "ds5_dongle_manager"
 autobins = false
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -13,11 +13,11 @@ autobins = false
 # The `_lib` suffix may seem redundant but it is necessary
 # to make the lib name unique and wouldn't conflict with the bin name.
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
-name = "ds5_ns2pro_dongle_manager_lib"
+name = "ds5_dongle_manager_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [[bin]]
-name = "ds5_ns2pro_dongle_manager"
+name = "ds5_dongle_manager"
 path = "src/main.rs"
 
 [build-dependencies]
@@ -34,5 +34,4 @@ hidapi = "2"
 rodio = { version = "0.19", features = ["wav"] }
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.61", features = ["Win32_Devices_Communication", "Win32_Devices_DeviceAndDriverInstallation", "Win32_Devices_Usb", "Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_UI_WindowsAndMessaging"] }
-winreg = "0.55"
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_UI_WindowsAndMessaging"] }

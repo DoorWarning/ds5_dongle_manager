@@ -1,8 +1,6 @@
 mod app_config;
 mod commands;
 mod hid;
-mod ns2pro_winusb;
-mod serial_ns2pro;
 mod state;
 
 use app_config::{
@@ -15,29 +13,20 @@ use commands::{
     ds5_get_controller_low_battery_popup_enabled,
     ds5_get_controller_notification_popup_duration_ms,
     ds5_get_controller_notification_sound_enabled, ds5_get_controller_notification_sound_volumes,
-    ds5_get_low_battery_notification_enabled, ds5_get_ns2pro_auto_detect_enabled,
-    ds5_get_software_settings, ds5_get_system_info, ds5_get_tray_batteries,
-    ds5_get_ns2pro_pico_bridge_status,
+    ds5_get_low_battery_notification_enabled, ds5_get_software_settings, ds5_companion_exchange, ds5_get_system_info, ds5_get_tray_batteries,
     ds5_hide_controller_notification, ds5_hide_tray_popup, ds5_list_devices,
     ds5_make_controller_notification_input_safe, ds5_open_main_window,
     ds5_play_controller_notification_sound, ds5_quit_app, ds5_read_feature_report,
     ds5_read_input_report, ds5_reset_controller_notification_sound_volumes,
-    ds5_restart_ns2pro_pico_bridge,
-    ds5_restart_ns2pro_pico_bridge_wired,
-    ds5_scan_ns2pro_serial_once,
     ds5_send_feature_report, ds5_set_autostart_enabled, ds5_set_close_to_tray,
     ds5_set_controller_connection_popup_enabled, ds5_set_controller_low_battery_popup_enabled,
     ds5_set_controller_notification_popup_duration_ms,
     ds5_set_controller_notification_sound_enabled, ds5_set_controller_notification_sound_volume,
-    ds5_set_low_battery_notification_enabled, ds5_set_ns2pro_auto_detect_enabled,
-    ds5_set_start_minimized_enabled, ds5_show_controller_notification, ds5_start_device_monitor,
-    ds5_start_ns2pro_pico_bridge, ds5_stop_ns2pro_pico_bridge, ds5_update_tray_batteries,
+    ds5_set_low_battery_notification_enabled, ds5_set_start_minimized_enabled, ds5_show_controller_notification, ds5_start_device_monitor,
+    ds5_update_tray_batteries,
     ds5_update_tray_labels,
 };
-use state::{
-    DeviceMonitorState, Ns2ProAutoDetectState, Ns2ProPicoBridgeState, Ns2ProPicoBridgeStats,
-    TrayLabels, TrayState,
-};
+use state::{DeviceMonitorState, TrayLabels, TrayState};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tauri::{
@@ -68,18 +57,10 @@ pub fn run() {
         .manage(DeviceMonitorState {
             running: Arc::new(AtomicBool::new(false)),
         })
-        .manage(Ns2ProPicoBridgeState {
-            running: Arc::new(AtomicBool::new(false)),
-            stats: Arc::new(std::sync::Mutex::new(Ns2ProPicoBridgeStats::default())),
-            manual_pairing_until: Arc::new(std::sync::Mutex::new(None)),
-        })
-        .manage(Ns2ProAutoDetectState {
-            running: Arc::new(AtomicBool::new(false)),
-        })
         .manage(build_tray_state())
         .plugin(
             tauri_plugin_autostart::Builder::new()
-                .app_name("DS5 NS2Pro Dongle Manager")
+                .app_name("DS5 Dongle Manager")
                 .args(["--from-autostart", "--minimized"])
                 .build(),
         )
@@ -97,18 +78,12 @@ pub fn run() {
                 }
             }
 
-            commands::start_ns2pro_auto_detect_if_enabled(
-                app.handle().clone(),
-                app.state::<Ns2ProAutoDetectState>(),
-                app.state::<Ns2ProPicoBridgeState>(),
-            );
-
             let tray_popup_builder = WebviewWindowBuilder::new(
                 app,
                 TRAY_POPUP_LABEL,
                 WebviewUrl::App("/?tray=1".into()),
             )
-            .title("DS5 NS2Pro Dongle Manager Tray")
+            .title("DS5 Dongle Manager Tray")
             .inner_size(TRAY_POPUP_WIDTH, TRAY_POPUP_MIN_HEIGHT)
             .min_inner_size(TRAY_POPUP_WIDTH, TRAY_POPUP_MIN_HEIGHT)
             .max_inner_size(TRAY_POPUP_WIDTH, TRAY_POPUP_BATTERY_HEIGHT)
@@ -129,7 +104,7 @@ pub fn run() {
                 CONTROLLER_NOTIFICATION_LABEL,
                 WebviewUrl::App("/?controllerNotification=1".into()),
             )
-            .title("DS5 NS2Pro Dongle Manager Controller Notification")
+            .title("DS5 Dongle Manager Controller Notification")
             .inner_size(
                 CONTROLLER_NOTIFICATION_COLLAPSED_WIDTH,
                 CONTROLLER_NOTIFICATION_HEIGHT,
@@ -172,7 +147,7 @@ pub fn run() {
 
             TrayIconBuilder::with_id("main")
                 .icon(tray_icon)
-                .tooltip(format!("DS5 NS2Pro Dongle Manager\n{battery_text}"))
+                .tooltip(format!("DS5 Dongle Manager\n{battery_text}"))
                 .on_tray_icon_event(|tray, event| {
                     if let TrayIconEvent::Click {
                         button,
@@ -234,14 +209,9 @@ pub fn run() {
             ds5_get_system_info,
             ds5_list_devices,
             ds5_start_device_monitor,
-            ds5_start_ns2pro_pico_bridge,
-            ds5_restart_ns2pro_pico_bridge,
-            ds5_restart_ns2pro_pico_bridge_wired,
-            ds5_stop_ns2pro_pico_bridge,
-            ds5_get_ns2pro_pico_bridge_status,
-            ds5_scan_ns2pro_serial_once,
             ds5_read_feature_report,
             ds5_send_feature_report,
+            ds5_companion_exchange,
             ds5_read_input_report,
             ds5_update_tray_batteries,
             ds5_update_tray_labels,
@@ -249,8 +219,6 @@ pub fn run() {
             ds5_set_autostart_enabled,
             ds5_get_autostart_enabled,
             ds5_set_start_minimized_enabled,
-            ds5_set_ns2pro_auto_detect_enabled,
-            ds5_get_ns2pro_auto_detect_enabled,
             ds5_set_close_to_tray,
             ds5_get_close_to_tray,
             ds5_set_low_battery_notification_enabled,

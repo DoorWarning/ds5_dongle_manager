@@ -31,7 +31,6 @@ const CLOSE_BUTTON_SETTLE_MS = 120;
 interface SoftwareSettingsPayload {
   autostartEnabled: boolean;
   startMinimized: boolean;
-  ns2proAutoDetectEnabled: boolean;
   closeToTray: boolean;
   closeToTrayAsked: boolean;
   lowBatteryNotificationEnabled: boolean;

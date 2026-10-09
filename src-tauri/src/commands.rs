@@ -6,19 +6,15 @@ use crate::hid::{
     collect_supported_devices, devices_snapshot, error_to_string, open_device_by_path,
     HidDeviceInfoDto,
 };
-use crate::ns2pro_winusb::{find_present_ns2pro_output_paths, Ns2ProWinUsbDevice};
-use crate::serial_ns2pro::{has_serial_companion_for_pico_path, Ns2ProSerialBridge};
-use crate::state::{
-    DeviceMonitorState, Ns2ProAutoDetectState, Ns2ProPicoBridgeState, Ns2ProPicoBridgeStats,
-    TrayState,
-};
+use crate::state::{DeviceMonitorState, TrayState};
+
 use hidapi::HidApi;
 use rodio::{Decoder, OutputStream, Sink};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::BufReader;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -26,12 +22,12 @@ use tauri::path::BaseDirectory;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_autostart::ManagerExt;
 
+
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase")]
 struct SoftwareSettings {
     autostart_enabled: bool,
     start_minimized: bool,
-    ns2pro_auto_detect_enabled: bool,
     close_to_tray: bool,
     close_to_tray_asked: bool,
     low_battery_notification_enabled: bool,
@@ -47,7 +43,6 @@ impl Default for SoftwareSettings {
         Self {
             autostart_enabled: false,
             start_minimized: false,
-            ns2pro_auto_detect_enabled: false,
             close_to_tray: false,
             close_to_tray_asked: false,
             low_battery_notification_enabled: true,
@@ -101,7 +96,6 @@ impl ControllerNotificationSoundVolumes {
 pub struct SoftwareSettingsDto {
     pub autostart_enabled: bool,
     pub start_minimized: bool,
-    pub ns2pro_auto_detect_enabled: bool,
     pub close_to_tray: bool,
     pub close_to_tray_asked: bool,
     pub low_battery_notification_enabled: bool,
@@ -117,91 +111,6 @@ pub struct SoftwareSettingsDto {
 pub struct SystemInfoDto {
     os: String,
     arch: String,
-}
-
-const NINTENDO_VENDOR_ID: u16 = 0x057e;
-const NS2PRO_PRODUCT_ID: u16 = 0x2069;
-const SONY_VENDOR_ID: u16 = 0x054c;
-const DUALSENSE_PRODUCT_ID: u16 = 0x0ce6;
-const DUALSENSE_EDGE_PRODUCT_ID: u16 = 0x0df2;
-const PICO_MANAGER_VENDOR_ID: u16 = 0x2e8a;
-const PICO_MANAGER_PRODUCT_ID: u16 = 0x00d5;
-const PICO_COMMAND_REPORT_ID: u8 = 0xf6;
-const PICO_CMD_PREPARE_DUALSENSE_RUNTIME: u8 = 0x04;
-const NS2PRO_INPUT_REPORT_ID: u8 = 0x05;
-const NS2PRO_MIN_PAYLOAD_LEN: usize = 0x3c;
-const NS2PRO_MAX_PAYLOAD_LEN: usize = 64;
-const NS2PRO_PICO_MAX_CONSECUTIVE_WRITE_ERRORS: u32 = 30;
-const NS2PRO_MAX_CONSECUTIVE_READ_ERRORS: u32 = 30;
-const NS2PRO_MAX_IDLE_READS: u32 = 3_000;
-const NS2PRO_INPUT_DRAIN_READ_LIMIT: usize = 16;
-const NS2PRO_WAIT_DEVICE_RETRY_MS: u64 = 500;
-const NS2PRO_SERIAL_WRITE_ERROR_LIMIT: u32 = 16;
-const NS2PRO_SERIAL_REOPEN_RETRY_MS: u64 = 1_000;
-const NS2PRO_BRIDGE_RESTART_WAIT_MS: u64 = 1_200;
-const NS2PRO_MANUAL_PAIRING_WINDOW_MS: u64 = 5_000;
-const NS2PRO_WIRED_INIT_RETRY_DELAY_MS: u64 = 2_000;
-const PICO_RUNTIME_PREPARE_REENUMERATE_WAIT_MS: u64 = 6_000;
-const NS2PRO_WIRED_INIT_STEP_DEFAULT_DELAY_MS: u64 = 1;
-const NS2PRO_WIRED_INIT_STEP_LONG_DELAY_MS: u64 = 100;
-
-struct Ns2ProWiredInitStep {
-    bytes: &'static [u8],
-    delay_after_ms: u64,
-}
-
-const NS2PRO_WIRED_INIT_STEPS: &[Ns2ProWiredInitStep] = &[
-    Ns2ProWiredInitStep { bytes: &[0x02, 0x91, 0x00, 0x01, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x30, 0x01, 0x00], delay_after_ms: NS2PRO_WIRED_INIT_STEP_DEFAULT_DELAY_MS },
-    Ns2ProWiredInitStep { bytes: &[0x02, 0x91, 0x00, 0x01, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0x30, 0x01, 0x00], delay_after_ms: NS2PRO_WIRED_INIT_STEP_DEFAULT_DELAY_MS },
-    Ns2ProWiredInitStep { bytes: &[0x02, 0x91, 0x00, 0x01, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0x30, 0x01, 0x00], delay_after_ms: NS2PRO_WIRED_INIT_STEP_DEFAULT_DELAY_MS },
-    Ns2ProWiredInitStep { bytes: &[0x02, 0x91, 0x00, 0x01, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x30, 0x01, 0x00], delay_after_ms: NS2PRO_WIRED_INIT_STEP_DEFAULT_DELAY_MS },
-    Ns2ProWiredInitStep { bytes: &[0x02, 0x91, 0x00, 0x01, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x31, 0x01, 0x00], delay_after_ms: NS2PRO_WIRED_INIT_STEP_DEFAULT_DELAY_MS },
-    Ns2ProWiredInitStep { bytes: &[0x02, 0x91, 0x00, 0x01, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0xC0, 0x1F, 0x00], delay_after_ms: NS2PRO_WIRED_INIT_STEP_DEFAULT_DELAY_MS },
-    Ns2ProWiredInitStep { bytes: &[0x02, 0x91, 0x00, 0x01, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0xC0, 0x1F, 0x00], delay_after_ms: NS2PRO_WIRED_INIT_STEP_DEFAULT_DELAY_MS },
-    Ns2ProWiredInitStep { bytes: &[0x07, 0x91, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00], delay_after_ms: NS2PRO_WIRED_INIT_STEP_DEFAULT_DELAY_MS },
-    Ns2ProWiredInitStep { bytes: &[0x0C, 0x91, 0x00, 0x02, 0x00, 0x04, 0x00, 0x00, 0x27, 0x00, 0x00, 0x00], delay_after_ms: NS2PRO_WIRED_INIT_STEP_LONG_DELAY_MS },
-    Ns2ProWiredInitStep { bytes: &[0x11, 0x91, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00], delay_after_ms: NS2PRO_WIRED_INIT_STEP_DEFAULT_DELAY_MS },
-    Ns2ProWiredInitStep { bytes: &[0x0A, 0x91, 0x00, 0x08, 0x00, 0x14, 0x00, 0x00, 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x35, 0x00, 0x46, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00], delay_after_ms: NS2PRO_WIRED_INIT_STEP_DEFAULT_DELAY_MS },
-    Ns2ProWiredInitStep { bytes: &[0x0C, 0x91, 0x00, 0x04, 0x00, 0x04, 0x00, 0x00, 0x27, 0x00, 0x00, 0x00], delay_after_ms: NS2PRO_WIRED_INIT_STEP_DEFAULT_DELAY_MS },
-    Ns2ProWiredInitStep { bytes: &[0x01, 0x91, 0x00, 0x0C, 0x00, 0x00, 0x00, 0x00], delay_after_ms: NS2PRO_WIRED_INIT_STEP_DEFAULT_DELAY_MS },
-    Ns2ProWiredInitStep { bytes: &[0x01, 0x91, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00], delay_after_ms: NS2PRO_WIRED_INIT_STEP_DEFAULT_DELAY_MS },
-    Ns2ProWiredInitStep { bytes: &[0x08, 0x91, 0x00, 0x02, 0x00, 0x04, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00], delay_after_ms: NS2PRO_WIRED_INIT_STEP_DEFAULT_DELAY_MS },
-    Ns2ProWiredInitStep { bytes: &[0x03, 0x91, 0x00, 0x0A, 0x00, 0x04, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00], delay_after_ms: NS2PRO_WIRED_INIT_STEP_DEFAULT_DELAY_MS },
-    Ns2ProWiredInitStep { bytes: &[0x03, 0x91, 0x00, 0x0D, 0x00, 0x08, 0x00, 0x00, 0x01, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF], delay_after_ms: NS2PRO_WIRED_INIT_STEP_DEFAULT_DELAY_MS },
-];
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Ns2ProPicoBridgeStatusDto {
-    pub running: bool,
-    pub pico_path: Option<String>,
-    pub ns2pro_path: Option<String>,
-    pub ns2pro_output_path: Option<String>,
-    pub input_transport: Option<String>,
-    pub input_transport_port: Option<String>,
-    pub input_transport_error: Option<String>,
-    pub waiting_reason: Option<String>,
-    pub input_reports_received: u64,
-    pub input_reports_forwarded: u64,
-    pub output_reports_received: u64,
-    pub output_reports_forwarded: u64,
-    pub oversized_reports: u64,
-    pub write_errors: u64,
-    pub read_errors: u64,
-    pub last_serial_output_report_len: u32,
-    pub last_serial_output_report_head_hex: Option<String>,
-    pub last_output_report_len: u32,
-    pub last_output_report_head_hex: Option<String>,
-    pub last_output_write_len: u32,
-    pub last_output_error: Option<String>,
-    pub last_error: Option<String>,
-}
-
-#[derive(Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StartNs2ProPicoBridgeOptions {
-    pub pico_path: Option<String>,
-    pub ns2pro_path: Option<String>,
-    pub read_timeout_ms: Option<i32>,
 }
 
 #[tauri::command]
@@ -353,39 +262,6 @@ pub async fn ds5_get_autostart_enabled(app: AppHandle) -> Result<bool, String> {
 }
 
 #[tauri::command]
-pub async fn ds5_set_ns2pro_auto_detect_enabled(
-    app: AppHandle,
-    auto_detect_state: State<'_, Ns2ProAutoDetectState>,
-    bridge_state: State<'_, Ns2ProPicoBridgeState>,
-    enabled: bool,
-) -> Result<SoftwareSettingsDto, String> {
-    let mut settings = load_software_settings_async(app.clone()).await?;
-    settings.ns2pro_auto_detect_enabled = enabled;
-    save_software_settings_async(app.clone(), settings.clone()).await?;
-
-    if enabled {
-        start_ns2pro_auto_detect_loop(
-            app.clone(),
-            Arc::clone(&auto_detect_state.running),
-            Arc::clone(&bridge_state.running),
-            Arc::clone(&bridge_state.stats),
-        );
-    } else {
-        auto_detect_state.running.store(false, Ordering::SeqCst);
-    }
-
-    emit_software_settings_changed(&app, settings.clone());
-    Ok(settings.into())
-}
-
-#[tauri::command]
-pub async fn ds5_get_ns2pro_auto_detect_enabled(app: AppHandle) -> Result<bool, String> {
-    Ok(load_software_settings_async(app)
-        .await?
-        .ns2pro_auto_detect_enabled)
-}
-
-#[tauri::command]
 pub async fn ds5_list_devices() -> Result<Vec<HidDeviceInfoDto>, String> {
     tauri::async_runtime::spawn_blocking(|| {
         let api = HidApi::new().map_err(error_to_string)?;
@@ -431,1585 +307,6 @@ pub fn ds5_start_device_monitor(
 }
 
 #[tauri::command]
-pub async fn ds5_start_ns2pro_pico_bridge(
-    state: State<'_, Ns2ProPicoBridgeState>,
-    options: StartNs2ProPicoBridgeOptions,
-) -> Result<Ns2ProPicoBridgeStatusDto, String> {
-    open_ns2pro_manual_pairing_window(&state);
-    if state
-        .running
-        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-        .is_err()
-    {
-        return ns2pro_pico_bridge_status(&state, true);
-    }
-
-    let running = Arc::clone(&state.running);
-    let stats = Arc::clone(&state.stats);
-    let read_timeout_ms = options.read_timeout_ms.unwrap_or(1).clamp(0, 1000);
-    spawn_ns2pro_pico_bridge_thread(
-        running,
-        stats,
-        Arc::clone(&state.manual_pairing_until),
-        true,
-        options.pico_path,
-        options.ns2pro_path,
-        read_timeout_ms,
-    );
-
-    ns2pro_pico_bridge_status(&state, true)
-}
-
-#[tauri::command]
-pub async fn ds5_restart_ns2pro_pico_bridge(
-    state: State<'_, Ns2ProPicoBridgeState>,
-    options: StartNs2ProPicoBridgeOptions,
-) -> Result<Ns2ProPicoBridgeStatusDto, String> {
-    open_ns2pro_manual_pairing_window(&state);
-    state.running.store(false, Ordering::SeqCst);
-    let wait_started = Instant::now();
-    while state
-        .running
-        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-        .is_err()
-    {
-        if wait_started.elapsed() >= Duration::from_millis(NS2PRO_BRIDGE_RESTART_WAIT_MS) {
-            return ns2pro_pico_bridge_status(&state, true);
-        }
-        thread::sleep(Duration::from_millis(25));
-    }
-
-    scan_ns2pro_serial_once(&state.stats);
-    let running = Arc::clone(&state.running);
-    let stats = Arc::clone(&state.stats);
-    let read_timeout_ms = options.read_timeout_ms.unwrap_or(1).clamp(0, 1000);
-    spawn_ns2pro_pico_bridge_thread(
-        running,
-        stats,
-        Arc::clone(&state.manual_pairing_until),
-        true,
-        options.pico_path,
-        options.ns2pro_path,
-        read_timeout_ms,
-    );
-
-    ns2pro_pico_bridge_status(&state, true)
-}
-
-#[tauri::command]
-pub async fn ds5_restart_ns2pro_pico_bridge_wired(
-    state: State<'_, Ns2ProPicoBridgeState>,
-    options: StartNs2ProPicoBridgeOptions,
-) -> Result<Ns2ProPicoBridgeStatusDto, String> {
-    close_ns2pro_manual_pairing_window(&state);
-    state.running.store(false, Ordering::SeqCst);
-    let wait_started = Instant::now();
-    while state
-        .running
-        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-        .is_err()
-    {
-        if wait_started.elapsed() >= Duration::from_millis(NS2PRO_BRIDGE_RESTART_WAIT_MS) {
-            return ns2pro_pico_bridge_status(&state, true);
-        }
-        thread::sleep(Duration::from_millis(25));
-    }
-
-    scan_ns2pro_serial_once(&state.stats);
-    let running = Arc::clone(&state.running);
-    let stats = Arc::clone(&state.stats);
-    let read_timeout_ms = options.read_timeout_ms.unwrap_or(1).clamp(0, 1000);
-    spawn_ns2pro_pico_bridge_thread(
-        running,
-        stats,
-        Arc::clone(&state.manual_pairing_until),
-        false,
-        options.pico_path,
-        options.ns2pro_path,
-        read_timeout_ms,
-    );
-
-    ns2pro_pico_bridge_status(&state, true)
-}
-
-#[tauri::command]
-pub fn ds5_stop_ns2pro_pico_bridge(
-    state: State<'_, Ns2ProPicoBridgeState>,
-) -> Result<Ns2ProPicoBridgeStatusDto, String> {
-    state.running.store(false, Ordering::SeqCst);
-    {
-        let mut bridge_stats = state.stats.lock().map_err(|error| error.to_string())?;
-        bridge_stats.running = false;
-    }
-    close_ns2pro_manual_pairing_window(&state);
-    ns2pro_pico_bridge_status(&state, false)
-}
-
-#[tauri::command]
-pub async fn ds5_get_ns2pro_pico_bridge_status(
-    app: AppHandle,
-    state: State<'_, Ns2ProPicoBridgeState>,
-) -> Result<Ns2ProPicoBridgeStatusDto, String> {
-    let running = Arc::clone(&state.running);
-    let stats = Arc::clone(&state.stats);
-    let manual_pairing_until = Arc::clone(&state.manual_pairing_until);
-    tauri::async_runtime::spawn_blocking(move || {
-        let auto_detect_scan_enabled = load_software_settings(&app)
-            .map(|settings| settings.ns2pro_auto_detect_enabled)
-            .unwrap_or(false);
-        let manual_pairing_active = ns2pro_manual_pairing_active(&manual_pairing_until);
-        let should_scan_ns2pro = auto_detect_scan_enabled
-            || (manual_pairing_active
-                && stats
-                    .lock()
-                    .map(|stats| should_keep_manual_ns2pro_scan(&stats))
-                    .unwrap_or(false));
-        ns2pro_pico_bridge_status_from_parts(&running, &stats, should_scan_ns2pro)
-    })
-    .await
-    .map_err(|error| error.to_string())?
-}
-
-#[tauri::command]
-pub fn ds5_scan_ns2pro_serial_once(
-    state: State<'_, Ns2ProPicoBridgeState>,
-) -> Result<Ns2ProPicoBridgeStatusDto, String> {
-    scan_ns2pro_serial_once(&state.stats);
-    ns2pro_pico_bridge_status(&state, true)
-}
-
-fn ns2pro_pico_bridge_status(
-    state: &State<'_, Ns2ProPicoBridgeState>,
-    scan_ns2pro: bool,
-) -> Result<Ns2ProPicoBridgeStatusDto, String> {
-    ns2pro_pico_bridge_status_from_parts(&state.running, &state.stats, scan_ns2pro)
-}
-
-fn ns2pro_pico_bridge_status_from_parts(
-    running: &Arc<AtomicBool>,
-    stats: &Arc<std::sync::Mutex<Ns2ProPicoBridgeStats>>,
-    scan_ns2pro: bool,
-) -> Result<Ns2ProPicoBridgeStatusDto, String> {
-    if !running.load(Ordering::SeqCst) {
-        refresh_ns2pro_detection_status(stats, scan_ns2pro);
-    }
-
-    let mut bridge_stats = stats.lock().map_err(|error| error.to_string())?;
-    bridge_stats.running = running.load(Ordering::SeqCst);
-    Ok(Ns2ProPicoBridgeStatusDto::from(bridge_stats.clone()))
-}
-
-pub fn scan_ns2pro_serial_once(stats: &Arc<std::sync::Mutex<Ns2ProPicoBridgeStats>>) {
-    match PicoInputTransport::open_serial_preferred() {
-        Ok(transport) => set_pico_input_transport_stats(stats, &transport, None),
-        Err(error) => {
-            let transport = PicoInputTransport::Disabled;
-            set_pico_input_transport_stats(stats, &transport, Some(error));
-        }
-    }
-}
-
-fn open_ns2pro_manual_pairing_window(state: &State<'_, Ns2ProPicoBridgeState>) {
-    if let Ok(mut until) = state.manual_pairing_until.lock() {
-        *until = Some(Instant::now() + Duration::from_millis(NS2PRO_MANUAL_PAIRING_WINDOW_MS));
-    }
-}
-
-fn close_ns2pro_manual_pairing_window(state: &State<'_, Ns2ProPicoBridgeState>) {
-    close_ns2pro_manual_pairing_window_raw(&state.manual_pairing_until);
-}
-
-fn close_ns2pro_manual_pairing_window_raw(
-    manual_pairing_until: &Arc<std::sync::Mutex<Option<Instant>>>,
-) {
-    if let Ok(mut until) = manual_pairing_until.lock() {
-        *until = None;
-    }
-}
-
-fn ns2pro_manual_pairing_active(
-    manual_pairing_until: &Arc<std::sync::Mutex<Option<Instant>>>,
-) -> bool {
-    manual_pairing_until
-        .lock()
-        .map(|until| until.map(|deadline| Instant::now() <= deadline).unwrap_or(false))
-        .unwrap_or(false)
-}
-
-fn ns2pro_manual_pairing_deadline(
-    manual_pairing_until: &Arc<std::sync::Mutex<Option<Instant>>>,
-) -> Option<Instant> {
-    manual_pairing_until.lock().ok().and_then(|until| *until)
-}
-
-fn spawn_ns2pro_pico_bridge_thread(
-    running: Arc<AtomicBool>,
-    stats: Arc<std::sync::Mutex<Ns2ProPicoBridgeStats>>,
-    manual_pairing_until: Arc<std::sync::Mutex<Option<Instant>>>,
-    manual_pairing_limited: bool,
-    pico_path: Option<String>,
-    ns2pro_path: Option<String>,
-    read_timeout_ms: i32,
-) {
-    {
-        update_ns2pro_pico_bridge_stats(&stats, |bridge_stats| {
-            *bridge_stats = Ns2ProPicoBridgeStats {
-                running: true,
-                pico_path: pico_path.clone(),
-                ns2pro_path: ns2pro_path.clone(),
-                ns2pro_output_path: ns2pro_path.clone(),
-                input_transport: None,
-                input_transport_port: None,
-                input_transport_error: None,
-                ..Ns2ProPicoBridgeStats::default()
-            };
-        });
-    }
-
-    thread::spawn(move || {
-        let result = run_ns2pro_pico_bridge_loop(
-            &running,
-            &stats,
-            manual_pairing_limited
-                .then(|| ns2pro_manual_pairing_deadline(&manual_pairing_until))
-                .flatten(),
-            pico_path,
-            ns2pro_path,
-            read_timeout_ms,
-        );
-
-        if let Err(error) = result {
-            update_ns2pro_pico_bridge_stats(&stats, |bridge_stats| {
-                bridge_stats.last_error = Some(error);
-            });
-        }
-
-        running.store(false, Ordering::SeqCst);
-        update_ns2pro_pico_bridge_stats(&stats, |bridge_stats| {
-            bridge_stats.running = false;
-            if ns2pro_manual_pairing_active(&manual_pairing_until) {
-                if let Ok(api) = HidApi::new() {
-                    bridge_stats.pico_path = find_first_supported_pico_path(&api);
-                    bridge_stats.ns2pro_path = find_first_ns2pro_input_path(&api);
-                    bridge_stats.ns2pro_output_path =
-                        find_first_ns2pro_output_path(&api, bridge_stats.ns2pro_path.as_deref());
-                } else {
-                    bridge_stats.pico_path = None;
-                    bridge_stats.ns2pro_path = None;
-                    bridge_stats.ns2pro_output_path = None;
-                }
-            } else {
-                bridge_stats.pico_path = None;
-                bridge_stats.ns2pro_path = None;
-                bridge_stats.ns2pro_output_path = None;
-            }
-            if bridge_stats.ns2pro_path.is_none() {
-                bridge_stats.input_reports_received = 0;
-                bridge_stats.input_reports_forwarded = 0;
-                bridge_stats.output_reports_received = 0;
-                bridge_stats.output_reports_forwarded = 0;
-                bridge_stats.oversized_reports = 0;
-                bridge_stats.write_errors = 0;
-                bridge_stats.read_errors = 0;
-            }
-            if bridge_stats.last_error.is_none() {
-                bridge_stats.input_transport = None;
-                bridge_stats.input_transport_port = None;
-                bridge_stats.input_transport_error = None;
-                bridge_stats.waiting_reason = match (
-                    bridge_stats.pico_path.as_deref(),
-                    bridge_stats.ns2pro_path.as_deref(),
-                ) {
-                    (None, Some(_)) => Some("waitingPico".to_string()),
-                    (Some(_), Some(_)) => Some("waitingNs2ProBridgeStart".to_string()),
-                    _ => None,
-                };
-            }
-        });
-        if manual_pairing_limited {
-            close_ns2pro_manual_pairing_window_raw(&manual_pairing_until);
-        }
-    });
-}
-
-fn start_ns2pro_auto_detect_loop(
-    app: AppHandle,
-    auto_detect_running: Arc<AtomicBool>,
-    bridge_running: Arc<AtomicBool>,
-    bridge_stats: Arc<std::sync::Mutex<Ns2ProPicoBridgeStats>>,
-) {
-    if auto_detect_running
-        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-        .is_err()
-    {
-        return;
-    }
-
-    thread::spawn(move || {
-        while auto_detect_running.load(Ordering::SeqCst) {
-            if !load_software_settings(&app)
-                .map(|settings| settings.ns2pro_auto_detect_enabled)
-                .unwrap_or(false)
-            {
-                auto_detect_running.store(false, Ordering::SeqCst);
-                break;
-            }
-
-            if bridge_running.load(Ordering::SeqCst) {
-                thread::sleep(Duration::from_millis(1_000));
-                continue;
-            }
-
-            if let Ok(api) = HidApi::new() {
-                let ds5_connected = collect_supported_devices(&api).iter().any(|device| {
-                    device.vendor_id == SONY_VENDOR_ID
-                        && (device.product_id == DUALSENSE_PRODUCT_ID
-                            || device.product_id == DUALSENSE_EDGE_PRODUCT_ID)
-                        && device.interface_number == 3
-                        && device.usage_page == 1
-                });
-                if ds5_connected {
-                    update_ns2pro_detection_status(&bridge_stats, None, None, None);
-                    thread::sleep(Duration::from_millis(1_500));
-                    continue;
-                }
-            }
-
-            let next_pair = HidApi::new().ok().and_then(|api| {
-                let pico_path = find_first_supported_pico_path(&api);
-                let ns2pro_path = find_first_ns2pro_input_path(&api);
-                let ns2pro_output_path =
-                    find_first_ns2pro_output_path(&api, ns2pro_path.as_deref());
-                update_ns2pro_detection_status(
-                    &bridge_stats,
-                    pico_path.clone(),
-                    ns2pro_path.clone(),
-                    ns2pro_output_path,
-                );
-                Some((pico_path, ns2pro_path?))
-            });
-
-            if let Some((pico_path, ns2pro_path)) = next_pair {
-                if bridge_running
-                    .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-                    .is_ok()
-                {
-                    spawn_ns2pro_pico_bridge_thread(
-                        Arc::clone(&bridge_running),
-                        Arc::clone(&bridge_stats),
-                        Arc::new(std::sync::Mutex::new(None)),
-                        false,
-                        pico_path,
-                        Some(ns2pro_path),
-                        1,
-                    );
-                }
-            }
-
-            thread::sleep(Duration::from_millis(1_500));
-        }
-    });
-}
-
-fn refresh_ns2pro_detection_status(
-    stats: &Arc<std::sync::Mutex<Ns2ProPicoBridgeStats>>,
-    scan_ns2pro: bool,
-) {
-    if !scan_ns2pro {
-        update_ns2pro_detection_status(stats, None, None, None);
-        return;
-    }
-
-    let paths = HidApi::new().ok().map(|api| {
-        let ns2pro_path = find_first_ns2pro_input_path(&api);
-        (
-            find_first_supported_pico_path(&api),
-            ns2pro_path.clone(),
-            find_first_ns2pro_output_path(&api, ns2pro_path.as_deref()),
-        )
-    });
-    match paths {
-        Some((pico_path, ns2pro_path, ns2pro_output_path)) => {
-            update_ns2pro_detection_status(stats, pico_path, ns2pro_path, ns2pro_output_path)
-        }
-        None => update_ns2pro_detection_status(stats, None, None, None),
-    }
-}
-
-fn update_ns2pro_detection_status(
-    stats: &Arc<std::sync::Mutex<Ns2ProPicoBridgeStats>>,
-    pico_path: Option<String>,
-    ns2pro_path: Option<String>,
-    ns2pro_output_path: Option<String>,
-) {
-    update_ns2pro_pico_bridge_stats(stats, |bridge_stats| {
-        if bridge_stats.running {
-            return;
-        }
-
-        bridge_stats.pico_path = pico_path;
-        bridge_stats.ns2pro_path = ns2pro_path;
-        bridge_stats.ns2pro_output_path = ns2pro_output_path;
-        if bridge_stats.ns2pro_path.is_none() {
-            bridge_stats.input_reports_received = 0;
-            bridge_stats.input_reports_forwarded = 0;
-            bridge_stats.output_reports_received = 0;
-            bridge_stats.output_reports_forwarded = 0;
-            bridge_stats.oversized_reports = 0;
-            bridge_stats.write_errors = 0;
-            bridge_stats.read_errors = 0;
-        }
-        bridge_stats.waiting_reason = match (
-            bridge_stats.pico_path.as_deref(),
-            bridge_stats.ns2pro_path.as_deref(),
-        ) {
-            (None, Some(_)) => Some("waitingPico".to_string()),
-            (Some(_), Some(_)) => Some("waitingNs2ProBridgeStart".to_string()),
-            _ => None,
-        };
-        bridge_stats.last_error = None;
-    });
-}
-
-fn should_keep_manual_ns2pro_scan(stats: &Ns2ProPicoBridgeStats) -> bool {
-    if stats.running {
-        return true;
-    }
-
-    if stats.pico_path.is_some() || stats.ns2pro_path.is_some() {
-        return true;
-    }
-
-    if stats.input_reports_received > 0
-        || stats.input_reports_forwarded > 0
-        || stats.output_reports_received > 0
-        || stats.output_reports_forwarded > 0
-    {
-        return true;
-    }
-
-    matches!(
-        stats.waiting_reason.as_deref(),
-        Some(
-            "waitingPico"
-                | "waitingNs2Pro"
-                | "waitingNs2ProBridgeStart"
-                | "waitingInput"
-                | "waitingForwarding"
-                | "waitingDualSenseReconnect"
-                | "forwarding"
-                | "inputReceiveFailed"
-                | "inputForwardFailed"
-                | "outputForwardFailed"
-        )
-    ) || stats.last_error.is_some()
-}
-
-fn ns2pro_bridge_waiting_reason(
-    running: bool,
-    pico_path: Option<&str>,
-    ns2pro_path: Option<&str>,
-    _input_reports_received: u64,
-    _input_reports_forwarded: u64,
-) -> String {
-    if !running {
-        return "inactive".to_string();
-    }
-
-    if pico_path.is_none() {
-        return "waitingPico".to_string();
-    }
-
-    if ns2pro_path.is_none() {
-        return "waitingNs2Pro".to_string();
-    }
-
-    "forwarding".to_string()
-}
-
-pub fn start_ns2pro_auto_detect_if_enabled(
-    app: AppHandle,
-    auto_detect_state: tauri::State<'_, Ns2ProAutoDetectState>,
-    bridge_state: tauri::State<'_, Ns2ProPicoBridgeState>,
-) {
-    if load_software_settings(&app)
-        .map(|settings| settings.ns2pro_auto_detect_enabled)
-        .unwrap_or(false)
-    {
-        start_ns2pro_auto_detect_loop(
-            app,
-            Arc::clone(&auto_detect_state.running),
-            Arc::clone(&bridge_state.running),
-            Arc::clone(&bridge_state.stats),
-        );
-    }
-}
-
-fn run_ns2pro_pico_bridge_loop(
-    running: &Arc<AtomicBool>,
-    stats: &Arc<std::sync::Mutex<Ns2ProPicoBridgeStats>>,
-    manual_pairing_deadline: Option<Instant>,
-    pico_path: Option<String>,
-    ns2pro_path: Option<String>,
-    read_timeout_ms: i32,
-) -> Result<(), String> {
-    let manual_pairing_limited = manual_pairing_deadline.is_some();
-    let mut pico_input = PicoInputTransport::Disabled;
-    set_pico_input_transport_stats(stats, &pico_input, None);
-
-    let (resolved_pico_path, resolved_ns2pro_path) =
-        wait_for_ns2pro_bridge_devices(
-        running,
-        stats,
-        manual_pairing_deadline,
-        pico_path,
-        ns2pro_path,
-    )?;
-
-    update_ns2pro_pico_bridge_stats(stats, |bridge_stats| {
-        bridge_stats.pico_path = Some(resolved_pico_path.clone());
-        bridge_stats.ns2pro_path = Some(resolved_ns2pro_path.clone());
-        bridge_stats.ns2pro_output_path = Some(resolved_ns2pro_path.clone());
-        bridge_stats.waiting_reason = Some("forwarding".to_string());
-        bridge_stats.last_error = None;
-    });
-    match PicoInputTransport::open_serial_for_pico_path(Some(resolved_pico_path.as_str())) {
-        Ok(transport) => {
-            pico_input = transport;
-            set_pico_input_transport_stats(stats, &pico_input, None);
-        }
-        Err(error) => {
-            pico_input = PicoInputTransport::Disabled;
-            set_pico_input_transport_stats(stats, &pico_input, Some(error.clone()));
-            update_ns2pro_pico_bridge_stats(stats, |bridge_stats| {
-                bridge_stats.waiting_reason = Some("inputForwardFailed".to_string());
-                bridge_stats.last_error = Some(error.clone());
-            });
-            if !manual_pairing_limited {
-                update_ns2pro_pico_bridge_stats(stats, |bridge_stats| {
-                    bridge_stats.pico_path = None;
-                    bridge_stats.waiting_reason = None;
-                });
-                return Ok(());
-            }
-        }
-    }
-
-    let mut _ns2pro_input_api_guard = HidApi::new().map_err(error_to_string)?;
-    let mut current_ns2pro_path = resolved_ns2pro_path;
-    let mut ns2pro = match open_ns2pro_input_device_handle(&_ns2pro_input_api_guard, &current_ns2pro_path) {
-        Ok(device) => device,
-        Err(error) => {
-            update_ns2pro_pico_bridge_stats(stats, |bridge_stats| {
-                bridge_stats.waiting_reason = Some("inputReceiveFailed".to_string());
-                bridge_stats.last_error = Some(error.clone());
-            });
-            return Err(error);
-        }
-    };
-    let mut current_ns2pro_output_path = current_ns2pro_path.clone();
-    let mut ns2pro_output = None;
-    let mut input_buffer = vec![0_u8; 65];
-    let mut consecutive_write_errors = 0_u32;
-    let mut consecutive_read_errors = 0_u32;
-    let mut consecutive_serial_write_errors = 0_u32;
-    let mut idle_reads = 0_u32;
-    let mut next_serial_reopen_at = Instant::now();
-    let mut next_output_reopen_at = Instant::now();
-    let bridge_started_at = Instant::now();
-    let mut init_confirmed = false;
-    let mut init_attempted = false;
-    let mut next_init_retry_at = bridge_started_at + Duration::from_millis(NS2PRO_WIRED_INIT_RETRY_DELAY_MS);
-    let mut pending_output_report: Option<[u8; 64]> = None;
-
-    while running.load(Ordering::SeqCst) {
-        let manual_pairing_expired = manual_pairing_deadline
-            .map(|deadline| Instant::now() > deadline)
-            .unwrap_or(false);
-
-        if manual_pairing_expired && pico_input.is_disabled() {
-            update_ns2pro_pico_bridge_stats(stats, |bridge_stats| {
-                bridge_stats.pico_path = None;
-                bridge_stats.waiting_reason = None;
-                bridge_stats.input_transport_error = None;
-                bridge_stats.last_error = None;
-            });
-            return Ok(());
-        }
-
-        if manual_pairing_limited && !manual_pairing_expired {
-            reopen_serial_transport_if_needed(
-                &mut pico_input,
-                stats,
-                &mut next_serial_reopen_at,
-                Some(resolved_pico_path.as_str()),
-            );
-        }
-
-        let serial_output_reports = match pico_input.take_pending_output_reports() {
-            Ok(reports) => reports,
-            Err(error) => {
-                update_ns2pro_pico_bridge_stats(stats, |bridge_stats| {
-                    bridge_stats.waiting_reason = Some("outputForwardFailed".to_string());
-                    bridge_stats.write_errors = bridge_stats.write_errors.saturating_add(1);
-                    bridge_stats.last_error = Some(error);
-                });
-                Vec::new()
-            }
-        };
-
-        if !serial_output_reports.is_empty() {
-            pending_output_report = serial_output_reports.last().copied();
-            update_ns2pro_pico_bridge_stats(stats, |bridge_stats| {
-                bridge_stats.output_reports_received = bridge_stats
-                    .output_reports_received
-                    .saturating_add(serial_output_reports.len() as u64);
-                if let Some(report) = pending_output_report.as_ref() {
-                    bridge_stats.last_serial_output_report_len = report.len() as u32;
-                    bridge_stats.last_serial_output_report_head_hex = Some(hex_head(report, 12));
-                }
-            });
-        }
-
-        if let Some(report) = pending_output_report.as_ref() {
-            if ns2pro_output.is_none() {
-                ns2pro_output = try_open_ns2pro_output_device_if_needed(
-                    &current_ns2pro_path,
-                    &mut current_ns2pro_output_path,
-                    stats,
-                    &mut next_output_reopen_at,
-                );
-            }
-
-            if let Some(device) = ns2pro_output.as_mut() {
-                if let Err(error) = forward_ns2pro_output_reports(
-                    device,
-                    &current_ns2pro_output_path,
-                    stats,
-                    std::slice::from_ref(report),
-                ) {
-                    update_ns2pro_pico_bridge_stats(stats, |bridge_stats| {
-                        bridge_stats.waiting_reason = Some("outputForwardFailed".to_string());
-                        bridge_stats.write_errors = bridge_stats.write_errors.saturating_add(1);
-                        bridge_stats.last_error = Some(error);
-                    });
-                    ns2pro_output = None;
-                    next_output_reopen_at = Instant::now();
-                } else {
-                    pending_output_report = None;
-                }
-            }
-        }
-
-        if !init_confirmed && !init_attempted && Instant::now() >= next_init_retry_at {
-            if ns2pro_output.is_none() {
-                ns2pro_output = try_open_ns2pro_output_device_if_needed(
-                    &current_ns2pro_path,
-                    &mut current_ns2pro_output_path,
-                    stats,
-                    &mut next_output_reopen_at,
-                );
-            }
-
-            if let Some(device) = ns2pro_output.as_mut() {
-                let output_init =
-                    device.send_initialization_reports(&current_ns2pro_output_path);
-                init_attempted = true;
-                update_ns2pro_pico_bridge_stats(stats, |bridge_stats| {
-                    bridge_stats.waiting_reason = Some("forwarding".to_string());
-                    if let Err(error) = output_init.as_ref() {
-                        bridge_stats.last_error = Some(error.clone());
-                    } else {
-                        bridge_stats.last_error = None;
-                    }
-                });
-            }
-        }
-
-        match ns2pro.read_timeout(&mut input_buffer, read_timeout_ms) {
-            Ok(0) => {
-                idle_reads = idle_reads.saturating_add(1);
-                if idle_reads >= NS2PRO_MAX_IDLE_READS {
-                    if let Some(next_path) = current_ns2pro_input_path(&current_ns2pro_path) {
-                        if next_path != current_ns2pro_path {
-                            if let Ok((next_api, next_device)) = open_ns2pro_input_device(&next_path) {
-                                _ns2pro_input_api_guard = next_api;
-                                ns2pro = next_device;
-                                current_ns2pro_path = next_path;
-                                init_confirmed = false;
-                                init_attempted = false;
-                                next_init_retry_at = Instant::now()
-                                    + Duration::from_millis(NS2PRO_WIRED_INIT_RETRY_DELAY_MS);
-                                ns2pro_output = None;
-                                next_output_reopen_at = Instant::now();
-                        }
-                        }
-                        idle_reads = 0;
-                        update_ns2pro_pico_bridge_stats(stats, |bridge_stats| {
-                            bridge_stats.ns2pro_path = Some(current_ns2pro_path.clone());
-                            bridge_stats.ns2pro_output_path =
-                                Some(current_ns2pro_output_path.clone());
-                            bridge_stats.waiting_reason = Some("forwarding".to_string());
-                            bridge_stats.last_error = None;
-                        });
-                        continue;
-                    }
-                    idle_reads = 0;
-                    update_ns2pro_pico_bridge_stats(stats, |bridge_stats| {
-                        bridge_stats.waiting_reason = Some("forwarding".to_string());
-                        bridge_stats.last_error = None;
-                    });
-                }
-                continue;
-            }
-            Ok(count) => {
-                consecutive_read_errors = 0;
-                idle_reads = 0;
-                init_confirmed = true;
-                update_ns2pro_pico_bridge_stats(stats, |bridge_stats| {
-                    bridge_stats.input_reports_received =
-                        bridge_stats.input_reports_received.saturating_add(1);
-                    bridge_stats.waiting_reason = Some("forwarding".to_string());
-                });
-
-                let mut latest_payload = [0_u8; NS2PRO_MAX_PAYLOAD_LEN];
-                let Some(mut latest_payload_len) =
-                    copy_ns2pro_input_payload(&input_buffer, count, &mut latest_payload)
-                else {
-                    if count > 1
-                        && input_buffer.first().copied() == Some(NS2PRO_INPUT_REPORT_ID)
-                        && (count - 1) > NS2PRO_MAX_PAYLOAD_LEN
-                    {
-                        update_ns2pro_pico_bridge_stats(stats, |bridge_stats| {
-                            bridge_stats.oversized_reports =
-                                bridge_stats.oversized_reports.saturating_add(1);
-                        });
-                    }
-                    continue;
-                };
-
-                for _ in 0..NS2PRO_INPUT_DRAIN_READ_LIMIT {
-                    match ns2pro.read_timeout(&mut input_buffer, 0) {
-                        Ok(0) => break,
-                        Ok(next_count) => {
-                            update_ns2pro_pico_bridge_stats(stats, |bridge_stats| {
-                                bridge_stats.input_reports_received =
-                                    bridge_stats.input_reports_received.saturating_add(1);
-                            });
-                            match copy_ns2pro_input_payload(&input_buffer, next_count, &mut latest_payload) {
-                                Some(next_payload_len) => {
-                                    latest_payload_len = next_payload_len;
-                                }
-                                None => {
-                                    if next_count > 1
-                                        && input_buffer.first().copied() == Some(NS2PRO_INPUT_REPORT_ID)
-                                        && (next_count - 1) > NS2PRO_MAX_PAYLOAD_LEN
-                                    {
-                                        update_ns2pro_pico_bridge_stats(stats, |bridge_stats| {
-                                            bridge_stats.oversized_reports =
-                                                bridge_stats.oversized_reports.saturating_add(1);
-                                        });
-                                    }
-                                }
-                            }
-                        }
-                        Err(_) => break,
-                    }
-                }
-
-                let payload = &latest_payload[..latest_payload_len];
-
-                if pico_input.is_disabled() {
-                    if manual_pairing_limited && !manual_pairing_expired {
-                        reopen_serial_transport_if_needed(
-                            &mut pico_input,
-                            stats,
-                            &mut next_serial_reopen_at,
-                            Some(resolved_pico_path.as_str()),
-                        );
-                    }
-                }
-
-                if pico_input.is_disabled() {
-                    if manual_pairing_expired || !manual_pairing_limited {
-                        update_ns2pro_pico_bridge_stats(stats, |bridge_stats| {
-                            bridge_stats.pico_path = None;
-                            bridge_stats.waiting_reason = None;
-                            bridge_stats.input_transport_error = None;
-                            bridge_stats.last_error = None;
-                        });
-                        return Ok(());
-                    }
-                    update_ns2pro_pico_bridge_stats(stats, |bridge_stats| {
-                        bridge_stats.waiting_reason = Some("inputForwardFailed".to_string());
-                        bridge_stats.input_transport = Some("serial".to_string());
-                        bridge_stats.input_transport_error = bridge_stats.input_transport_error
-                            .clone()
-                            .or_else(|| Some("Serial is unavailable; HID Feature input forwarding is disabled.".to_string()));
-                        bridge_stats.last_error = bridge_stats.input_transport_error.clone();
-                    });
-                    continue;
-                }
-
-                match pico_input.send(payload) {
-                    Ok(()) => {
-                        consecutive_write_errors = 0;
-                        consecutive_serial_write_errors = 0;
-                        update_ns2pro_pico_bridge_stats(stats, |bridge_stats| {
-                            bridge_stats.input_reports_forwarded =
-                                bridge_stats.input_reports_forwarded.saturating_add(1);
-                            bridge_stats.waiting_reason = Some("forwarding".to_string());
-                            bridge_stats.input_transport_error = None;
-                            bridge_stats.last_error = None;
-                        });
-                        set_pico_input_transport_stats(stats, &pico_input, None);
-                    }
-                    Err(error) => {
-                        let message = error;
-                        if matches!(pico_input, PicoInputTransport::Serial(_)) {
-                            consecutive_serial_write_errors =
-                                consecutive_serial_write_errors.saturating_add(1);
-                            update_ns2pro_pico_bridge_stats(stats, |bridge_stats| {
-                                bridge_stats.waiting_reason = Some("inputForwardFailed".to_string());
-                                bridge_stats.write_errors = bridge_stats.write_errors.saturating_add(1);
-                                bridge_stats.last_error = Some(message.clone());
-                            });
-                            if consecutive_serial_write_errors < NS2PRO_SERIAL_WRITE_ERROR_LIMIT {
-                                continue;
-                            }
-                            pico_input = PicoInputTransport::Disabled;
-                            set_pico_input_transport_stats(stats, &pico_input, Some(message.clone()));
-                            consecutive_serial_write_errors = 0;
-                            next_serial_reopen_at = Instant::now() + Duration::from_millis(NS2PRO_SERIAL_REOPEN_RETRY_MS);
-                            if !manual_pairing_limited {
-                                update_ns2pro_pico_bridge_stats(stats, |bridge_stats| {
-                                    bridge_stats.pico_path = None;
-                                    bridge_stats.waiting_reason = None;
-                                    bridge_stats.last_error = None;
-                                });
-                                return Ok(());
-                            }
-                            continue;
-                        }
-
-                        consecutive_write_errors = consecutive_write_errors.saturating_add(1);
-                        update_ns2pro_pico_bridge_stats(stats, |bridge_stats| {
-                            bridge_stats.waiting_reason = Some("inputForwardFailed".to_string());
-                            bridge_stats.write_errors = bridge_stats.write_errors.saturating_add(1);
-                            bridge_stats.last_error = Some(message.clone());
-                        });
-                        if consecutive_write_errors >= NS2PRO_PICO_MAX_CONSECUTIVE_WRITE_ERRORS {
-                            if manual_pairing_expired {
-                                return Ok(());
-                            }
-                            match recover_pico_if_ns2pro_present(&current_ns2pro_path, stats) {
-                                PicoRecovery::Found => {
-                                    consecutive_write_errors = 0;
-                                    continue;
-                                }
-                                PicoRecovery::WaitingForPico => {
-                                    consecutive_write_errors = 0;
-                                    thread::sleep(Duration::from_millis(NS2PRO_WAIT_DEVICE_RETRY_MS));
-                                    continue;
-                                }
-                                PicoRecovery::Ns2ProMissing => {}
-                            }
-                            return Err(format!(
-                                "Pico write failed {consecutive_write_errors} times in a row; restarting NS2Pro bridge. Last error: {message}"
-                            ));
-                        }
-                    }
-                }
-            }
-            Err(error) => {
-                consecutive_read_errors = consecutive_read_errors.saturating_add(1);
-                let message = error_to_string(error);
-                update_ns2pro_pico_bridge_stats(stats, |bridge_stats| {
-                    bridge_stats.waiting_reason = Some("inputReceiveFailed".to_string());
-                    bridge_stats.read_errors = bridge_stats.read_errors.saturating_add(1);
-                    bridge_stats.last_error = Some(message.clone());
-                });
-                if consecutive_read_errors >= NS2PRO_MAX_CONSECUTIVE_READ_ERRORS {
-                    if let Some(next_path) = current_ns2pro_input_path(&current_ns2pro_path) {
-                        if let Ok((next_api, next_device)) = open_ns2pro_input_device(&next_path) {
-                            _ns2pro_input_api_guard = next_api;
-                            ns2pro = next_device;
-                            current_ns2pro_path = next_path;
-                            consecutive_read_errors = 0;
-                            idle_reads = 0;
-                            init_confirmed = false;
-                            init_attempted = false;
-                            next_init_retry_at = Instant::now()
-                                + Duration::from_millis(NS2PRO_WIRED_INIT_RETRY_DELAY_MS);
-                            ns2pro_output = None;
-                            next_output_reopen_at = Instant::now();
-                            update_ns2pro_pico_bridge_stats(stats, |bridge_stats| {
-                                bridge_stats.ns2pro_path = Some(current_ns2pro_path.clone());
-                                bridge_stats.ns2pro_output_path =
-                                    Some(current_ns2pro_output_path.clone());
-                                bridge_stats.waiting_reason = Some("forwarding".to_string());
-                                bridge_stats.last_error = None;
-                            });
-                            continue;
-                        }
-                    }
-
-                    let device_still_present = HidApi::new()
-                        .ok()
-                        .map(|api| ns2pro_input_path_exists(&api, &current_ns2pro_path))
-                        .unwrap_or(false);
-                    if device_still_present {
-                        consecutive_read_errors = 0;
-                        update_ns2pro_pico_bridge_stats(stats, |bridge_stats| {
-                            bridge_stats.waiting_reason = Some("forwarding".to_string());
-                            bridge_stats.last_error = None;
-                        });
-                        thread::sleep(Duration::from_millis(25));
-                        continue;
-                    }
-
-                    return Err(format!(
-                        "NS2Pro HID read failed {consecutive_read_errors} times in a row and the device path disappeared; restarting NS2Pro bridge. Last error: {message}"
-                    ));
-                }
-                thread::sleep(Duration::from_millis(10));
-            }
-        }
-    }
-
-    Ok(())
-}
-
-fn reopen_serial_transport_if_needed(
-    transport: &mut PicoInputTransport,
-    stats: &Arc<std::sync::Mutex<Ns2ProPicoBridgeStats>>,
-    next_retry_at: &mut Instant,
-    pico_path: Option<&str>,
-) {
-    if !transport.is_disabled() {
-        return;
-    }
-
-    let now = Instant::now();
-    if now < *next_retry_at {
-        return;
-    }
-    *next_retry_at = now + Duration::from_millis(NS2PRO_SERIAL_REOPEN_RETRY_MS);
-
-    match PicoInputTransport::open_serial_for_pico_path(pico_path) {
-        Ok(next_transport) => {
-            *transport = next_transport;
-            set_pico_input_transport_stats(stats, transport, None);
-            update_ns2pro_pico_bridge_stats(stats, |bridge_stats| {
-                bridge_stats.last_error = None;
-            });
-        }
-        Err(error) => {
-            set_pico_input_transport_stats(stats, transport, Some(error));
-        }
-    }
-}
-
-fn copy_ns2pro_input_payload(
-    input_buffer: &[u8],
-    count: usize,
-    payload: &mut [u8; NS2PRO_MAX_PAYLOAD_LEN],
-) -> Option<usize> {
-    if count <= 1 || input_buffer.first().copied() != Some(NS2PRO_INPUT_REPORT_ID) {
-        return None;
-    }
-
-    let payload_len = count - 1;
-    if !(NS2PRO_MIN_PAYLOAD_LEN..=NS2PRO_MAX_PAYLOAD_LEN).contains(&payload_len) {
-        return None;
-    }
-
-    payload[..payload_len].copy_from_slice(&input_buffer[1..count]);
-    Some(payload_len)
-}
-
-fn hex_head(bytes: &[u8], limit: usize) -> String {
-    bytes.iter()
-        .take(limit)
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-enum PicoInputTransport {
-    Serial(Ns2ProSerialBridge),
-    Disabled,
-}
-
-impl PicoInputTransport {
-    fn open_serial_preferred() -> Result<Self, String> {
-        Ns2ProSerialBridge::open_auto().map(Self::Serial)
-    }
-
-    fn open_serial_for_pico_path(pico_path: Option<&str>) -> Result<Self, String> {
-        Ns2ProSerialBridge::open_for_pico_path(pico_path).map(Self::Serial)
-    }
-
-    fn is_disabled(&self) -> bool {
-        matches!(self, Self::Disabled)
-    }
-
-    fn send(&mut self, payload: &[u8]) -> Result<(), String> {
-        match self {
-            Self::Serial(serial) => serial.write_ns2pro_report(payload),
-            Self::Disabled => Err("Serial is unavailable; HID Feature input forwarding is disabled.".to_string()),
-        }
-    }
-
-    fn take_pending_output_reports(&mut self) -> Result<Vec<[u8; 64]>, String> {
-        let Self::Serial(serial) = self else {
-            return Ok(Vec::new());
-        };
-
-        serial.read_ns2pro_output_reports()
-    }
-}
-
-fn forward_ns2pro_output_reports(
-    ns2pro: &mut Ns2ProOutputDevice,
-    output_path: &str,
-    stats: &Arc<std::sync::Mutex<Ns2ProPicoBridgeStats>>,
-    reports: &[[u8; 64]],
-) -> Result<(), String> {
-    for report in reports {
-        let written = ns2pro.write_report(report).map_err(|error| {
-            let message =
-                format!("NS2Pro output write failed ({output_path}): {}", error_to_string(error));
-            update_ns2pro_pico_bridge_stats(stats, |bridge_stats| {
-                bridge_stats.last_output_report_len = report.len() as u32;
-                bridge_stats.last_output_report_head_hex = Some(hex_head(report, 12));
-                bridge_stats.last_output_write_len = 0;
-                bridge_stats.last_output_error = Some(message.clone());
-            });
-            message
-        })?;
-        update_ns2pro_pico_bridge_stats(stats, |bridge_stats| {
-            bridge_stats.output_reports_forwarded =
-                bridge_stats.output_reports_forwarded.saturating_add(1);
-            bridge_stats.ns2pro_output_path = Some(output_path.to_string());
-            bridge_stats.last_output_report_len = report.len() as u32;
-            bridge_stats.last_output_report_head_hex = Some(hex_head(report, 12));
-            bridge_stats.last_output_write_len = written as u32;
-            bridge_stats.last_output_error = None;
-            bridge_stats.last_error = None;
-        });
-    }
-
-    Ok(())
-}
-
-fn set_pico_input_transport_stats(
-    stats: &Arc<std::sync::Mutex<Ns2ProPicoBridgeStats>>,
-    transport: &PicoInputTransport,
-    transport_error: Option<String>,
-) {
-    update_ns2pro_pico_bridge_stats(stats, |bridge_stats| match transport {
-        PicoInputTransport::Serial(serial) => {
-            bridge_stats.input_transport = Some("serial".to_string());
-            bridge_stats.input_transport_port = Some(serial.port_name().to_string());
-            bridge_stats.input_transport_error = None;
-        }
-        PicoInputTransport::Disabled => {
-            bridge_stats.input_transport = Some("serial".to_string());
-            bridge_stats.input_transport_port = None;
-            bridge_stats.input_transport_error = transport_error
-                .or_else(|| Some("Serial is unavailable; HID Feature input forwarding is disabled.".to_string()));
-        }
-    });
-}
-
-enum PicoRecovery {
-    Found,
-    WaitingForPico,
-    Ns2ProMissing,
-}
-
-fn recover_pico_if_ns2pro_present(
-    current_ns2pro_path: &str,
-    stats: &Arc<std::sync::Mutex<Ns2ProPicoBridgeStats>>,
-) -> PicoRecovery {
-    let api = match HidApi::new() {
-        Ok(api) => api,
-        Err(error) => {
-            update_ns2pro_pico_bridge_stats(stats, |bridge_stats| {
-                bridge_stats.waiting_reason = Some("waitingPico".to_string());
-                bridge_stats.last_error = Some(error_to_string(error));
-            });
-            return PicoRecovery::WaitingForPico;
-        }
-    };
-
-    let ns2pro_path = if ns2pro_input_path_exists(&api, current_ns2pro_path) {
-        Some(current_ns2pro_path.to_string())
-    } else {
-        find_first_ns2pro_input_path(&api)
-    };
-
-    let Some(ns2pro_path) = ns2pro_path else {
-        update_ns2pro_pico_bridge_stats(stats, |bridge_stats| {
-            bridge_stats.ns2pro_path = None;
-            bridge_stats.ns2pro_output_path = None;
-            bridge_stats.waiting_reason = Some("waitingNs2Pro".to_string());
-        });
-        return PicoRecovery::Ns2ProMissing;
-    };
-
-    let ns2pro_output_path = find_first_ns2pro_output_path(&api, Some(ns2pro_path.as_str()))
-        .or_else(|| Some(ns2pro_path.clone()));
-
-    let Some(pico_path) = find_first_supported_pico_path(&api) else {
-        update_ns2pro_pico_bridge_stats(stats, |bridge_stats| {
-            bridge_stats.pico_path = None;
-            bridge_stats.ns2pro_path = Some(ns2pro_path.clone());
-            bridge_stats.ns2pro_output_path = ns2pro_output_path.clone();
-            bridge_stats.waiting_reason = Some("waitingPico".to_string());
-            bridge_stats.last_error = None;
-        });
-        return PicoRecovery::WaitingForPico;
-    };
-
-    update_ns2pro_pico_bridge_stats(stats, |bridge_stats| {
-        bridge_stats.pico_path = Some(pico_path);
-        bridge_stats.ns2pro_path = Some(ns2pro_path);
-        bridge_stats.ns2pro_output_path = ns2pro_output_path;
-        bridge_stats.waiting_reason = Some("waitingNs2ProBridgeStart".to_string());
-        bridge_stats.last_error = None;
-    });
-    PicoRecovery::Found
-}
-
-fn open_ns2pro_input_device(path: &str) -> Result<(HidApi, hidapi::HidDevice), String> {
-    let api = HidApi::new().map_err(error_to_string)?;
-    let device = open_ns2pro_input_device_handle(&api, path)?;
-    Ok((api, device))
-}
-
-fn open_ns2pro_input_device_handle(
-    api: &HidApi,
-    path: &str,
-) -> Result<hidapi::HidDevice, String> {
-    open_device_by_path(api, path)
-}
-
-fn open_ns2pro_output_device(path: &str) -> Result<Ns2ProOutputDevice, String> {
-    Ns2ProOutputDevice::open(path)
-}
-
-fn current_ns2pro_input_path(previous_path: &str) -> Option<String> {
-    let api = HidApi::new().ok()?;
-    if ns2pro_input_path_exists(&api, previous_path) {
-        return Some(previous_path.to_string());
-    }
-    find_first_ns2pro_input_path(&api)
-}
-
-fn resolve_ns2pro_input_path(api: &HidApi, preferred_path: Option<&str>) -> Option<String> {
-    if let Some(path) = preferred_path.filter(|path| ns2pro_input_path_exists(api, path)) {
-        return Some(path.to_string());
-    }
-    find_first_ns2pro_input_path(api)
-}
-
-fn ns2pro_input_path_exists(api: &HidApi, path: &str) -> bool {
-    ns2pro_hid_path_exists(api, path)
-}
-
-fn wait_for_ns2pro_bridge_devices(
-    running: &Arc<AtomicBool>,
-    stats: &Arc<std::sync::Mutex<Ns2ProPicoBridgeStats>>,
-    manual_pairing_deadline: Option<Instant>,
-    preferred_pico_path: Option<String>,
-    preferred_ns2pro_path: Option<String>,
-) -> Result<(String, String), String> {
-    let mut last_error: Option<String> = None;
-    let prepared_runtime = prepare_pico_runtime_if_needed(preferred_pico_path.as_deref())
-        .inspect_err(|error| {
-            update_ns2pro_pico_bridge_stats(stats, |bridge_stats| {
-                bridge_stats.waiting_reason = Some("waitingDualSenseReconnect".to_string());
-                bridge_stats.last_error = Some(error.clone());
-            });
-        })?;
-    let runtime_deadline = prepared_runtime.then(|| {
-        Instant::now() + Duration::from_millis(PICO_RUNTIME_PREPARE_REENUMERATE_WAIT_MS)
-    });
-
-    while running.load(Ordering::SeqCst) {
-        if manual_pairing_deadline
-            .map(|deadline| Instant::now() > deadline)
-            .unwrap_or(false)
-        {
-            update_ns2pro_pico_bridge_stats(stats, |bridge_stats| {
-                bridge_stats.pico_path = None;
-                bridge_stats.ns2pro_path = None;
-                bridge_stats.ns2pro_output_path = None;
-                bridge_stats.waiting_reason = None;
-                bridge_stats.last_error = None;
-            });
-            return Err("NS2Pro manual pairing window expired.".to_string());
-        }
-
-        match HidApi::new() {
-            Ok(api) => {
-                let resolved_ns2pro_path =
-                    resolve_ns2pro_input_path(&api, preferred_ns2pro_path.as_deref());
-                let waiting_runtime_pico = runtime_deadline
-                    .map(|deadline| Instant::now() <= deadline)
-                    .unwrap_or(false);
-                let resolved_pico_path = if waiting_runtime_pico {
-                    find_first_runtime_pico_path(&api, true)
-                } else {
-                    resolve_supported_pico_path(&api, preferred_pico_path.as_deref())
-                };
-
-                update_ns2pro_pico_bridge_stats(stats, |bridge_stats| {
-                    bridge_stats.pico_path = resolved_pico_path.clone();
-                    bridge_stats.ns2pro_path = resolved_ns2pro_path.clone();
-                    bridge_stats.ns2pro_output_path = resolved_ns2pro_path.clone();
-                    bridge_stats.waiting_reason = Some(if waiting_runtime_pico
-                        && resolved_pico_path.is_none()
-                    {
-                        "waitingDualSenseReconnect".to_string()
-                    } else {
-                        ns2pro_bridge_waiting_reason(
-                            bridge_stats.running,
-                            resolved_pico_path.as_deref(),
-                            resolved_ns2pro_path.as_deref(),
-                            bridge_stats.input_reports_received,
-                            bridge_stats.input_reports_forwarded,
-                        )
-                    });
-                    bridge_stats.last_error = None;
-                });
-
-                if let (Some(pico_path), Some(ns2pro_path)) =
-                    (resolved_pico_path, resolved_ns2pro_path)
-                {
-                    return Ok((pico_path, ns2pro_path));
-                }
-            }
-            Err(error) => {
-                let message = error_to_string(error);
-                if last_error.as_deref() != Some(message.as_str()) {
-                    last_error = Some(message.clone());
-                    update_ns2pro_pico_bridge_stats(stats, |bridge_stats| {
-                        bridge_stats.last_error = Some(message);
-                    });
-                }
-            }
-        }
-
-        thread::sleep(Duration::from_millis(NS2PRO_WAIT_DEVICE_RETRY_MS));
-    }
-
-    Err("NS2Pro bridge was stopped before Pico and NS2Pro were both available.".to_string())
-}
-
-fn find_first_supported_pico_path(api: &HidApi) -> Option<String> {
-    let devices = collect_supported_devices(api);
-    devices
-        .iter()
-        .find(|device| {
-            device.vendor_id == SONY_VENDOR_ID
-                && (device.product_id == DUALSENSE_PRODUCT_ID
-                    || device.product_id == DUALSENSE_EDGE_PRODUCT_ID)
-                && device.interface_number == 3
-                && device.usage_page == 1
-                && has_serial_companion_for_pico_path(&device.path)
-        })
-        .or_else(|| {
-            devices
-                .iter()
-                .find(|device| {
-                    device.vendor_id == PICO_MANAGER_VENDOR_ID
-                        && device.product_id == PICO_MANAGER_PRODUCT_ID
-                })
-        })
-        .or_else(|| {
-            devices
-                .iter()
-                .find(|device| {
-                    device.vendor_id == SONY_VENDOR_ID
-                        && (device.product_id == DUALSENSE_PRODUCT_ID
-                            || device.product_id == DUALSENSE_EDGE_PRODUCT_ID)
-                        && device.interface_number == 3
-                        && device.usage_page == 1
-                })
-        })
-        .map(|device| device.path.clone())
-}
-
-fn resolve_supported_pico_path(api: &HidApi, preferred_path: Option<&str>) -> Option<String> {
-    if let Some(path) = preferred_path {
-        let devices = collect_supported_devices(api);
-        if devices.iter().any(|device| device.path == path) {
-            return Some(path.to_string());
-        }
-    }
-
-    find_first_supported_pico_path(api)
-}
-
-fn find_first_runtime_pico_path(api: &HidApi, require_serial_companion: bool) -> Option<String> {
-    collect_supported_devices(api)
-        .into_iter()
-        .find(|device| {
-            device.vendor_id == SONY_VENDOR_ID
-                && (device.product_id == DUALSENSE_PRODUCT_ID
-                    || device.product_id == DUALSENSE_EDGE_PRODUCT_ID)
-                && device.interface_number == 3
-                && device.usage_page == 1
-                && (!require_serial_companion || has_serial_companion_for_pico_path(&device.path))
-        })
-        .map(|device| device.path)
-}
-
-fn prepare_pico_runtime_if_needed(preferred_path: Option<&str>) -> Result<bool, String> {
-    let api = HidApi::new().map_err(error_to_string)?;
-    let devices = collect_supported_devices(&api);
-
-    let preferred_device = preferred_path.and_then(|path| {
-        devices
-            .iter()
-            .find(|device| device.path == path)
-    });
-
-    let runtime_present = devices.iter().any(|device| {
-        device.vendor_id == SONY_VENDOR_ID
-            && (device.product_id == DUALSENSE_PRODUCT_ID
-                || device.product_id == DUALSENSE_EDGE_PRODUCT_ID)
-            && device.interface_number == 3
-            && device.usage_page == 1
-    });
-
-    let manager_path = preferred_device
-        .filter(|device| {
-            device.vendor_id == PICO_MANAGER_VENDOR_ID
-                && device.product_id == PICO_MANAGER_PRODUCT_ID
-        })
-        .map(|device| device.path.clone())
-        .or_else(|| {
-            devices
-                .iter()
-                .find(|device| {
-                    device.vendor_id == PICO_MANAGER_VENDOR_ID
-                        && device.product_id == PICO_MANAGER_PRODUCT_ID
-                })
-                .map(|device| device.path.clone())
-        });
-
-    let Some(manager_path) = manager_path else {
-        return Ok(false);
-    };
-
-    if runtime_present {
-        return Ok(false);
-    }
-
-    let device = open_device_by_path(&api, &manager_path)?;
-    let buffer = [PICO_COMMAND_REPORT_ID, PICO_CMD_PREPARE_DUALSENSE_RUNTIME];
-    device.send_feature_report(&buffer).map_err(error_to_string)?;
-    Ok(true)
-}
-
-fn find_first_ns2pro_input_path(api: &HidApi) -> Option<String> {
-    ns2pro_hid_candidates(api)
-        .into_iter()
-        .min_by_key(|device| {
-            let usage_page_penalty = if device.usage_page == 1 { 0 } else { 1 };
-            (usage_page_penalty, device.interface_number)
-        })
-        .map(|device| device.path)
-}
-
-fn find_first_ns2pro_output_path(api: &HidApi, preferred_input_path: Option<&str>) -> Option<String> {
-    if let Some(path) = preferred_input_path.filter(|path| ns2pro_input_path_exists(api, path)) {
-        return Some(path.to_string());
-    }
-    find_first_ns2pro_input_path(api)
-}
-
-fn try_open_ns2pro_output_device_if_needed(
-    current_ns2pro_input_path: &str,
-    current_ns2pro_output_path: &mut String,
-    stats: &Arc<std::sync::Mutex<Ns2ProPicoBridgeStats>>,
-    next_retry_at: &mut Instant,
-) -> Option<Ns2ProOutputDevice> {
-    let now = Instant::now();
-    if now < *next_retry_at {
-        return None;
-    }
-    *next_retry_at = now + Duration::from_millis(NS2PRO_WAIT_DEVICE_RETRY_MS);
-
-    let Ok(api) = HidApi::new() else {
-        return None;
-    };
-
-    let Some(next_output_path) =
-        find_first_ns2pro_output_path(&api, Some(current_ns2pro_input_path))
-    else {
-        return None;
-    };
-
-    match open_ns2pro_output_device(&next_output_path) {
-        Ok(next_device) => {
-            *current_ns2pro_output_path = next_output_path;
-            update_ns2pro_pico_bridge_stats(stats, |bridge_stats| {
-                bridge_stats.ns2pro_output_path = Some(current_ns2pro_output_path.clone());
-                bridge_stats.last_output_error = None;
-                bridge_stats.last_error = None;
-            });
-            Some(next_device)
-        }
-        Err(error) => {
-            update_ns2pro_pico_bridge_stats(stats, |bridge_stats| {
-                bridge_stats.ns2pro_output_path = Some(next_output_path.clone());
-                bridge_stats.last_output_error = Some(error);
-            });
-            None
-        }
-    }
-}
-
-fn ns2pro_hid_path_exists(api: &HidApi, path: &str) -> bool {
-    api.device_list().any(|device| {
-        device.vendor_id() == NINTENDO_VENDOR_ID
-            && device.product_id() == NS2PRO_PRODUCT_ID
-            && device.interface_number() >= 0
-            && device.path().to_string_lossy() == path
-    })
-}
-
-fn ns2pro_hid_candidates(api: &HidApi) -> Vec<Ns2ProHidCandidate> {
-    api.device_list()
-        .filter(|device| {
-            device.vendor_id() == NINTENDO_VENDOR_ID
-                && device.product_id() == NS2PRO_PRODUCT_ID
-                && device.interface_number() >= 0
-        })
-        .map(|device| Ns2ProHidCandidate {
-            path: device.path().to_string_lossy().to_string(),
-            interface_number: device.interface_number(),
-            usage_page: device.usage_page(),
-        })
-        .collect()
-}
-
-struct Ns2ProHidCandidate {
-    path: String,
-    interface_number: i32,
-    usage_page: u16,
-}
-
-struct Ns2ProOutputDevice {
-    device: hidapi::HidDevice,
-}
-
-impl Ns2ProOutputDevice {
-    fn open(path: &str) -> Result<Self, String> {
-        let api = HidApi::new().map_err(error_to_string)?;
-        let device = open_device_by_path(&api, path)?;
-        Ok(Self { device })
-    }
-
-    fn send_initialization_reports(&mut self, path: &str) -> Result<(), String> {
-        let init_path = find_present_ns2pro_output_paths()
-            .ok()
-            .and_then(|paths| paths.into_iter().next())
-            .ok_or_else(|| "No NS2Pro WinUSB init interface was found.".to_string())?;
-        let mut init_device = Ns2ProWinUsbDevice::open(&init_path)?;
-        for step in NS2PRO_WIRED_INIT_STEPS {
-            let written = init_device.write_output_report(step.bytes)?;
-            if written == 0 {
-                return Err(format!(
-                    "NS2Pro wired init wrote 0 bytes on {path} for command 0x{:02X}",
-                    step.bytes[0]
-                ));
-            }
-            if written < step.bytes.len() {
-                return Err(format!(
-                    "NS2Pro wired init wrote {written}/{} bytes on {path} for command 0x{:02X}",
-                    step.bytes.len(),
-                    step.bytes[0]
-                ));
-            }
-            thread::sleep(Duration::from_millis(step.delay_after_ms));
-        }
-        Ok(())
-    }
-
-    fn write_report(&mut self, report: &[u8]) -> Result<usize, String> {
-        if report.is_empty() {
-            return Err("NS2Pro output report is empty.".to_string());
-        }
-
-        let written = self.device.write(report).map_err(error_to_string)?;
-        if written != report.len() {
-            return Err(format!(
-                "NS2Pro output HID write incomplete: {written}/{}",
-                report.len()
-            ));
-        }
-
-        Ok(written)
-    }
-}
-
-fn update_ns2pro_pico_bridge_stats(
-    stats: &Arc<std::sync::Mutex<Ns2ProPicoBridgeStats>>,
-    update: impl FnOnce(&mut Ns2ProPicoBridgeStats),
-) {
-    if let Ok(mut bridge_stats) = stats.lock() {
-        update(&mut bridge_stats);
-    }
-}
-
-fn normalize_usb_port_key(path: &str) -> String {
-    let normalized = path.to_ascii_lowercase();
-    if let Some(start) = normalized.find("vid_") {
-        let tail = &normalized[start..];
-        let end = tail.find('#').unwrap_or(tail.len());
-        let mut instance = tail[..end].to_string();
-        if let Some(mi_index) = instance.find("&mi_") {
-            instance.truncate(mi_index);
-        }
-        return instance;
-    }
-
-    normalized.replace("&col", "#col")
-}
-
-fn resolve_feature_report_device_path(api: &HidApi, path: &str) -> String {
-    let requested_key = normalize_usb_port_key(path);
-    let devices = collect_supported_devices(api);
-    let manager_devices: Vec<&HidDeviceInfoDto> = devices
-        .iter()
-        .filter(|device| {
-            device.vendor_id == PICO_MANAGER_VENDOR_ID
-                && device.product_id == PICO_MANAGER_PRODUCT_ID
-        })
-        .collect();
-
-    if let Some(manager) = manager_devices.iter().find(|device| {
-        device.vendor_id == PICO_MANAGER_VENDOR_ID
-            && device.product_id == PICO_MANAGER_PRODUCT_ID
-            && normalize_usb_port_key(&device.path) == requested_key
-    }) {
-        return manager.path.clone();
-    }
-
-    if manager_devices.len() == 1 {
-        return manager_devices[0].path.clone();
-    }
-
-    path.to_string()
-}
-
-#[tauri::command]
 pub async fn ds5_read_feature_report(
     path: String,
     report_id: u8,
@@ -2017,8 +314,7 @@ pub async fn ds5_read_feature_report(
 ) -> Result<Vec<u8>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let api = HidApi::new().map_err(error_to_string)?;
-        let resolved_path = resolve_feature_report_device_path(&api, &path);
-        let device = open_device_by_path(&api, &resolved_path)?;
+        let device = open_device_by_path(&api, &path)?;
         let mut buffer = vec![0_u8; length.max(1)];
         buffer[0] = report_id;
         let count = device
@@ -2039,8 +335,7 @@ pub async fn ds5_send_feature_report(
 ) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         let api = HidApi::new().map_err(error_to_string)?;
-        let resolved_path = resolve_feature_report_device_path(&api, &path);
-        let device = open_device_by_path(&api, &resolved_path)?;
+        let device = open_device_by_path(&api, &path)?;
         let mut buffer = Vec::with_capacity(data.len() + 1);
         buffer.push(report_id);
         buffer.extend_from_slice(&data);
@@ -2111,7 +406,7 @@ pub async fn ds5_update_tray_batteries(
     crate::resize_tray_popup(&app);
     let _ = app.emit("ds5-tray-batteries-changed", battery_lines.clone());
     let menu_text = format_tray_menu_battery_text(&labels, &battery_lines);
-    let tooltip_text = format!("DS5 NS2Pro Dongle Manager\n{}", battery_lines.join("\n"));
+    let tooltip_text = format!("DS5 Dongle Manager\n{}", battery_lines.join("\n"));
 
     let battery_item = state.battery_item.lock().ok().and_then(|item| item.clone());
     if let Some(item) = battery_item.as_ref() {
@@ -2269,7 +564,7 @@ pub fn ds5_update_tray_labels(
 
     if let Some(tray) = app.tray_by_id("main") {
         tray.set_tooltip(Some(format!(
-            "DS5 NS2Pro Dongle Manager\n{}",
+            "DS5 Dongle Manager\n{}",
             battery_values.join("\n")
         )))
         .map_err(|error| error.to_string())?;
@@ -2538,35 +833,6 @@ fn normalize_volume(volume: f32) -> f32 {
     }
 }
 
-impl From<Ns2ProPicoBridgeStats> for Ns2ProPicoBridgeStatusDto {
-    fn from(stats: Ns2ProPicoBridgeStats) -> Self {
-        Self {
-            running: stats.running,
-            pico_path: stats.pico_path,
-            ns2pro_path: stats.ns2pro_path,
-            ns2pro_output_path: stats.ns2pro_output_path,
-            input_transport: stats.input_transport,
-            input_transport_port: stats.input_transport_port,
-            input_transport_error: stats.input_transport_error,
-            waiting_reason: stats.waiting_reason,
-            input_reports_received: stats.input_reports_received,
-            input_reports_forwarded: stats.input_reports_forwarded,
-            output_reports_received: stats.output_reports_received,
-            output_reports_forwarded: stats.output_reports_forwarded,
-            oversized_reports: stats.oversized_reports,
-            write_errors: stats.write_errors,
-            read_errors: stats.read_errors,
-            last_serial_output_report_len: stats.last_serial_output_report_len,
-            last_serial_output_report_head_hex: stats.last_serial_output_report_head_hex,
-            last_output_report_len: stats.last_output_report_len,
-            last_output_report_head_hex: stats.last_output_report_head_hex,
-            last_output_write_len: stats.last_output_write_len,
-            last_output_error: stats.last_output_error,
-            last_error: stats.last_error,
-        }
-    }
-}
-
 fn normalize_popup_duration_ms(duration_ms: u64) -> u64 {
     duration_ms.clamp(2_000, 15_000)
 }
@@ -2682,7 +948,6 @@ impl From<SoftwareSettings> for SoftwareSettingsDto {
         Self {
             autostart_enabled: settings.autostart_enabled,
             start_minimized: settings.start_minimized,
-            ns2pro_auto_detect_enabled: settings.ns2pro_auto_detect_enabled,
             close_to_tray: settings.close_to_tray,
             close_to_tray_asked: settings.close_to_tray_asked,
             low_battery_notification_enabled: settings.low_battery_notification_enabled,
@@ -2697,4 +962,101 @@ impl From<SoftwareSettings> for SoftwareSettingsDto {
                 .normalized(),
         }
     }
+}
+
+// ---- Companion protocol (ds5_dongle src/companion.cpp) ----------------------
+// PC mode: vendor Feature report 0xFA (63 bytes): SET = request, GET = reply.
+// NS mode (dongle = Pro Controller 057E:2009): output report 0x01 with
+// subcommand 0xE0 carries the request; the reply comes back in input report
+// 0x21, from byte 14 of the report data.
+const NINTENDO_VENDOR_ID: u16 = 0x057e;
+const SWITCH_PRO_PRODUCT_ID: u16 = 0x2009;
+const COMPANION_REPORT_ID: u8 = 0xfa;
+const COMPANION_FEATURE_SIZE: usize = 63;
+const COMPANION_SUBCOMMAND: u8 = 0xe0;
+const SWITCH_OUTPUT_REPORT_SIZE: usize = 63; // report 0x01 data, per the dongle's descriptor
+const SWITCH_REPLY_OFFSET: usize = 14; // in the 0x21 report data (report ID excluded)
+const SWITCH_NEUTRAL_RUMBLE: [u8; 8] = [0x00, 0x01, 0x40, 0x40, 0x00, 0x01, 0x40, 0x40];
+static SWITCH_PACKET_TIMER: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+fn is_switch_pro_path(api: &HidApi, path: &str) -> bool {
+    api.device_list().any(|device| {
+        device.path().to_string_lossy() == path
+            && device.vendor_id() == NINTENDO_VENDOR_ID
+            && device.product_id() == SWITCH_PRO_PRODUCT_ID
+    })
+}
+
+fn companion_exchange_feature(device: &hidapi::HidDevice, request: &[u8]) -> Result<Vec<u8>, String> {
+    let mut out = vec![0_u8; COMPANION_FEATURE_SIZE + 1];
+    out[0] = COMPANION_REPORT_ID;
+    let len = request.len().min(COMPANION_FEATURE_SIZE);
+    out[1..1 + len].copy_from_slice(&request[..len]);
+    device.send_feature_report(&out).map_err(error_to_string)?;
+
+    let mut reply = vec![0_u8; COMPANION_FEATURE_SIZE + 1];
+    reply[0] = COMPANION_REPORT_ID;
+    let count = device.get_feature_report(&mut reply).map_err(error_to_string)?;
+    reply.truncate(count);
+    if reply.first() == Some(&COMPANION_REPORT_ID) {
+        reply.remove(0);
+    }
+    Ok(reply)
+}
+
+fn companion_exchange_switch(
+    device: &hidapi::HidDevice,
+    request: &[u8],
+    timeout: Duration,
+) -> Result<Vec<u8>, String> {
+    let mut out = vec![0_u8; SWITCH_OUTPUT_REPORT_SIZE + 1];
+    out[0] = 0x01;
+    out[1] = SWITCH_PACKET_TIMER.fetch_add(1, Ordering::Relaxed) & 0x0f;
+    out[2..10].copy_from_slice(&SWITCH_NEUTRAL_RUMBLE);
+    out[10] = COMPANION_SUBCOMMAND;
+    let len = request.len().min(out.len() - 11);
+    out[11..11 + len].copy_from_slice(&request[..len]);
+    device.write(&out).map_err(error_to_string)?;
+
+    // hidapi puts the report ID in front of the data.
+    let deadline = Instant::now() + timeout;
+    let mut buffer = vec![0_u8; 64];
+    while Instant::now() < deadline {
+        let remaining = deadline.saturating_duration_since(Instant::now()).as_millis() as i32;
+        let count = device
+            .read_timeout(&mut buffer, remaining.max(1))
+            .map_err(error_to_string)?;
+        if count <= SWITCH_REPLY_OFFSET + 3 || buffer[0] != 0x21 {
+            continue;
+        }
+        let data = &buffer[1..count];
+        if data[13] != COMPANION_SUBCOMMAND {
+            continue;
+        }
+        let reply = &data[SWITCH_REPLY_OFFSET..];
+        if reply.len() >= 4 && request.len() >= 2 && reply[0] == request[0] && reply[1] == request[1] {
+            return Ok(reply.to_vec());
+        }
+    }
+    Err("timeout".to_string())
+}
+
+/// Sends one companion request and returns the reply packet [cmd, seq, status, len, data...].
+#[tauri::command]
+pub async fn ds5_companion_exchange(
+    path: String,
+    request: Vec<u8>,
+    timeout_ms: Option<u64>,
+) -> Result<Vec<u8>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let api = HidApi::new().map_err(error_to_string)?;
+        let device = open_device_by_path(&api, &path)?;
+        if is_switch_pro_path(&api, &path) {
+            companion_exchange_switch(&device, &request, Duration::from_millis(timeout_ms.unwrap_or(600)))
+        } else {
+            companion_exchange_feature(&device, &request)
+        }
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }

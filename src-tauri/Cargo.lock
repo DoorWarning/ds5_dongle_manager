@@ -954,7 +954,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "ds5_ns2pro_dongle_manager"
+name = "ds5_dongle_manager"
 version = "1.0.0"
 dependencies = [
  "hidapi",
@@ -967,7 +967,6 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
  "windows 0.61.3",
- "winreg 0.55.0",
 ]
 
 [[package]]

@@ -63,19 +63,6 @@
   grid-row: auto;
 }
 
-.config-section-ns2pro-rumble {
-  grid-column: 1;
-}
-
-.config-section-ns2pro-stick {
-  grid-column: 2;
-  grid-row: 1 / span 2;
-}
-
-.config-section-ns2pro-gyro {
-  grid-column: 1;
-}
-
 .config-section-input-owner {
   grid-column: 1 / -1;
 }
@@ -340,14 +327,6 @@
   border-radius: 8px;
 }
 
-@media (width <= 900px) {
-  .config-section-ns2pro-rumble,
-  .config-section-ns2pro-stick,
-  .config-section-ns2pro-gyro {
-    grid-column: 1 / -1;
-    grid-row: auto;
-  }
-}
 
 .config-note {
   margin-top: 0.42rem;
@@ -673,4 +652,26 @@
     opacity: 1;
     transform: translateY(0) scale(1);
   }
+}
+
+.config-select {
+  justify-self: end;
+  min-width: 140px;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 2px);
+  background: var(--background);
+  color: var(--foreground);
+  font-weight: 700;
+}
+
+.config-select:disabled {
+  opacity: 0.5;
+}
+
+/* Mode switch and notices span the whole settings grid. */
+.config-sections > .config-section-featured,
+.config-sections > .config-tip {
+  grid-column: 1 / -1;
 }

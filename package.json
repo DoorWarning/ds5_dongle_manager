@@ -1,5 +1,5 @@
 {
-  "name": "ds5-ns2pro-dongle-manager",
+  "name": "ds5-dongle-manager",
   "private": true,
   "version": "1.0.0",
   "type": "module",

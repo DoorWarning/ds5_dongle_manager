@@ -10,7 +10,7 @@ interface ControllerModeControlProps {
 
 export function ControllerModeControl({ value, disabled = false, onChange }: ControllerModeControlProps) {
   const { t } = useTranslation();
-  const optionLabels: Record<ControllerMode, string> = {
+  const optionLabels: Partial<Record<ControllerMode, string>> = {
     0: t("config.controllerModeOptions.ds5"),
     1: t("config.controllerModeOptions.dse"),
     2: t("config.controllerModeOptions.auto"),
