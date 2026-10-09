@@ -12,7 +12,18 @@ import {
   normalizeConfig,
   validateConfig,
 } from "../protocol/config";
-import { CompanionError, CompanionStatus, DongleControllerMode, type DongleInfo } from "../protocol/companion";
+import { CompanionError, CompanionStatus, DongleControllerMode, PROTOCOL_NS_EDIT, type DongleInfo } from "../protocol/companion";
+import {
+  nsSettingsEqual,
+  readMacro,
+  readMacroInfo,
+  readNsSettings,
+  writeMacro,
+  writeNsSettings,
+  type MacroEvent,
+  type MacroInfo,
+  type NsSettings,
+} from "../protocol/nsSettings";
 import {
   Ds5BridgeHidClient,
   NO_DEVICE_SELECTED_ERROR,
@@ -32,6 +43,8 @@ import {
 
 type Operation = "connecting" | "reading" | "applying" | "saving" | "reconnecting" | "switchingMode" | null;
 type SaveState = "idle" | "dirty" | "applied" | "saved";
+export type NsSaveState = "idle" | "dirty" | "saving" | "saved";
+const NS_SAVE_DELAY_MS = 250;
 export type DongleMode = "pc" | "ns";
 const BATTERY_REFRESH_INTERVAL_MS = 60_000;
 const DEVICE_DISCOVERY_FALLBACK_INTERVAL_MS = 30_000;
@@ -75,6 +88,13 @@ export interface UseDs5BridgeResult {
   /** Companion GET_INFO reply; null on firmware without the companion protocol. */
   dongleInfo: DongleInfo | null;
   ds5Connected: boolean;
+  /** NS mode with firmware that lets the app edit NS settings and macros. */
+  nsEditable: boolean;
+  /** Live NS settings on the dongle, and the app's edited copy (saved automatically). */
+  nsSettings: NsSettings | null;
+  nsDraft: NsSettings | null;
+  nsSaveState: NsSaveState;
+  macroInfo: MacroInfo | null;
   micActive: boolean | null;
   speakerActive: boolean | null;
   authorizedDeviceSerialNumber: Record<string, string>;
@@ -127,6 +147,9 @@ export interface UseDs5BridgeResult {
   switchDongleMode: (mode: DongleMode) => Promise<boolean>;
   setWakeLearning: (on: boolean) => Promise<void>;
   forgetWakeBeacon: () => Promise<void>;
+  setNsDraft: (next: NsSettings) => void;
+  readMacroSlot: (slot: number) => Promise<MacroEvent[]>;
+  writeMacroSlot: (slot: number, events: MacroEvent[]) => Promise<boolean>;
   resetToDefaults: () => Promise<void>;
   clearReturnHome: () => void;
   clearError: () => void;
@@ -159,6 +182,14 @@ export function useDs5Bridge(): UseDs5BridgeResult {
   const [signalStrength, setSignalStrength] = useState("--");
   const [dongleInfo, setDongleInfo] = useState<DongleInfo | null>(null);
   const [ds5Connected, setDs5Connected] = useState(false);
+  const [nsSettings, setNsSettings] = useState<NsSettings | null>(null);
+  const [nsDraft, setNsDraftState] = useState<NsSettings | null>(null);
+  const [nsSaveState, setNsSaveState] = useState<NsSaveState>("idle");
+  const [macroInfo, setMacroInfo] = useState<MacroInfo | null>(null);
+  const nsDraftRef = useRef<NsSettings | null>(null);
+  const nsWriteTimerRef = useRef<number | null>(null);
+  const nsWritingRef = useRef(false);
+  const macroBusyRef = useRef(false);
   const [micActive, setMicActive] = useState<boolean | null>(null);
   const [speakerActive, setSpeakerActive] = useState<boolean | null>(null);
   const [deviceSerialNumber, setDeviceSerialNumber] = useState("--");
@@ -206,6 +237,7 @@ export function useDs5Bridge(): UseDs5BridgeResult {
   const lastTrayBatteriesSignatureRef = useRef("");
   const isRuntimeConfigConnected = Boolean(client?.device.opened && isDualSenseRuntimeManagementDevice(client.device));
   const dongleMode: DongleMode | null = client ? (client.isSwitchMode ? "ns" : "pc") : null;
+  const nsEditable = dongleMode === "ns" && (dongleInfo?.protocol ?? 0) >= PROTOCOL_NS_EDIT;
 
   const issues = useMemo(() => validateConfig(draft), [draft]);
   const isConnected = Boolean(client?.device.opened);
@@ -353,6 +385,18 @@ export function useDs5Bridge(): UseDs5BridgeResult {
     setSaveState("idle");
   }, []);
 
+  const resetNsState = useCallback(() => {
+    if (nsWriteTimerRef.current !== null) {
+      window.clearTimeout(nsWriteTimerRef.current);
+      nsWriteTimerRef.current = null;
+    }
+    nsDraftRef.current = null;
+    setNsSettings(null);
+    setNsDraftState(null);
+    setNsSaveState("idle");
+    setMacroInfo(null);
+  }, []);
+
   const clearConnectedDevice = useCallback((options: { preserveConfig?: boolean; preserveReconnectTracking?: boolean } = {}) => {
     clientRef.current = null;
     autoConnectDeviceKeyRef.current = null;
@@ -375,11 +419,12 @@ export function useDs5Bridge(): UseDs5BridgeResult {
     setFirmwareVersion("--");
     setSignalStrength("--");
     setDongleInfo(null);
+    resetNsState();
     setDs5Connected(false);
     setMicActive(null);
     setSpeakerActive(null);
     setDeviceSerialNumber("--");
-  }, [cancelPendingConnectedDeviceDisconnect, clearReconnectTracking, resetConfigState]);
+  }, [cancelPendingConnectedDeviceDisconnect, clearReconnectTracking, resetConfigState, resetNsState]);
 
   const setLowBatteryNotificationEnabled = useCallback(async (enabled: boolean) => {
     lowBatteryNotificationEnabledRef.current = enabled;
@@ -566,6 +611,27 @@ export function useDs5Bridge(): UseDs5BridgeResult {
     }
   }, [updateLowBatterySoundState]);
 
+  // NS settings can change from the controller shortcuts too, so they are polled;
+  // an edit in progress is not overwritten.
+  const refreshNsState = useCallback(async (target: Ds5BridgeHidClient) => {
+    if (macroBusyRef.current) {
+      return;
+    }
+    const [nextSettings, nextMacroInfo] = await Promise.all([
+      readNsSettings(target.companion),
+      readMacroInfo(target.companion),
+    ]);
+    if (clientRef.current !== target) {
+      return;
+    }
+    setMacroInfo(nextMacroInfo);
+    setNsSettings((current) => nsSettingsEqual(current, nextSettings) ? current : nextSettings);
+    if (nsWriteTimerRef.current === null && !nsWritingRef.current) {
+      nsDraftRef.current = nextSettings;
+      setNsDraftState((current) => nsSettingsEqual(current, nextSettings) ? current : nextSettings);
+    }
+  }, []);
+
   /** Polls dongle state. Throws when the device stopped answering. */
   const refreshDongleInfo = useCallback(async (target: Ds5BridgeHidClient) => {
     const info = companionMissingRef.current.has(target)
@@ -591,6 +657,9 @@ export function useDs5Bridge(): UseDs5BridgeResult {
 
     if (target.isSwitchMode) {
       setSignalStrength("--");
+      if (info && info.protocol >= PROTOCOL_NS_EDIT) {
+        await refreshNsState(target);
+      }
       return;
     }
 
@@ -610,7 +679,7 @@ export function useDs5Bridge(): UseDs5BridgeResult {
       // Pre-companion firmware: a real RSSI means a DualSense is connected.
       setDs5Connected(status.signalStrength !== null);
     }
-  }, [applyBatteryText]);
+  }, [applyBatteryText, refreshNsState]);
 
   const handleConnectedDeviceDisconnected = useCallback((expectedDisconnect = false) => {
     if (!expectedDisconnect) {
@@ -1027,6 +1096,77 @@ export function useDs5Bridge(): UseDs5BridgeResult {
     [runWakeCommand],
   );
 
+  const flushNsDraft = useCallback(async () => {
+    nsWriteTimerRef.current = null;
+    const target = clientRef.current;
+    const draftToWrite = nsDraftRef.current;
+    if (!target || !draftToWrite || nsWritingRef.current) {
+      return;
+    }
+    nsWritingRef.current = true;
+    setNsSaveState("saving");
+    try {
+      await writeNsSettings(target.companion, draftToWrite);
+      if (clientRef.current === target) {
+        setNsSettings(draftToWrite);
+        setNsSaveState(nsDraftRef.current === draftToWrite ? "saved" : "dirty");
+      }
+    } catch (cause) {
+      setNsSaveState("dirty");
+      setError(errorMessage(cause, t));
+    } finally {
+      nsWritingRef.current = false;
+    }
+    // Edits made while writing go out next.
+    if (nsDraftRef.current !== draftToWrite && clientRef.current === target) {
+      nsWriteTimerRef.current = window.setTimeout(() => void flushNsDraft(), NS_SAVE_DELAY_MS);
+    }
+  }, [t]);
+
+  const setNsDraft = useCallback((next: NsSettings) => {
+    nsDraftRef.current = next;
+    setNsDraftState(next);
+    setNsSaveState("dirty");
+    if (nsWriteTimerRef.current !== null) {
+      window.clearTimeout(nsWriteTimerRef.current);
+    }
+    nsWriteTimerRef.current = window.setTimeout(() => void flushNsDraft(), NS_SAVE_DELAY_MS);
+  }, [flushNsDraft]);
+
+  const readMacroSlot = useCallback(async (slot: number): Promise<MacroEvent[]> => {
+    const target = clientRef.current;
+    if (!target) {
+      return [];
+    }
+    macroBusyRef.current = true;
+    try {
+      const info = await readMacroInfo(target.companion);
+      setMacroInfo(info);
+      return await readMacro(target.companion, slot, info.counts[slot] ?? 0);
+    } finally {
+      macroBusyRef.current = false;
+    }
+  }, []);
+
+  const writeMacroSlot = useCallback(async (slot: number, events: MacroEvent[]): Promise<boolean> => {
+    const target = clientRef.current;
+    if (!target) {
+      return false;
+    }
+    macroBusyRef.current = true;
+    try {
+      await writeMacro(target.companion, slot, events);
+      setMacroInfo(await readMacroInfo(target.companion));
+      return true;
+    } catch (cause) {
+      const busy = cause instanceof CompanionError && cause.status === CompanionStatus.Busy;
+      setError(busy ? t("macro.busy") : errorMessage(cause, t));
+      return false;
+    } finally {
+      macroBusyRef.current = false;
+    }
+  }, [t]);
+
   const setDraftField = useCallback(
     <Key extends keyof ConfigBody>(field: Key, value: ConfigBody[Key]) => {
       if (!clientRef.current?.device || !isDualSenseRuntimeManagementDevice(clientRef.current.device)) {
@@ -1362,6 +1502,11 @@ export function useDs5Bridge(): UseDs5BridgeResult {
     dongleMode,
     dongleInfo,
     ds5Connected,
+    nsEditable,
+    nsSettings,
+    nsDraft,
+    nsSaveState,
+    macroInfo,
     micActive,
     speakerActive,
     authorizedDeviceSerialNumber,
@@ -1413,6 +1558,9 @@ export function useDs5Bridge(): UseDs5BridgeResult {
     switchDongleMode,
     setWakeLearning,
     forgetWakeBeacon,
+    setNsDraft,
+    readMacroSlot,
+    writeMacroSlot,
     resetToDefaults,
     clearReturnHome: () => {
       shouldReturnHomeRef.current = false;

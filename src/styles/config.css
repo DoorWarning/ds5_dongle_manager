@@ -675,3 +675,159 @@
 .config-sections > .config-tip {
   grid-column: 1 / -1;
 }
+
+/* NS mode editors */
+.config-sections > .ns-macro-editor {
+  grid-column: 1 / -1;
+}
+
+.ns-editor-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+}
+
+.ns-editor-label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--muted-foreground);
+}
+
+.ns-trigger-editor {
+  display: flex;
+  flex-direction: column;
+}
+
+.ns-pattern-name {
+  width: 160px;
+  height: 32px;
+}
+
+.ns-pattern-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.4rem;
+}
+
+.ns-pattern-chip {
+  display: inline-flex;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+.ns-pattern-chip button {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.ns-pattern-chip button + button {
+  padding: 0.2rem 0.45rem;
+  border-left: 1px solid var(--border);
+  color: var(--muted-foreground);
+}
+
+.ns-turbo-buttons,
+.ns-macro-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.ns-macro-button {
+  min-width: 2rem;
+  height: 1.75rem;
+  padding: 0 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--background);
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.ns-macro-button.is-on {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.ns-macro-button:disabled {
+  opacity: 0.5;
+}
+
+.ns-macro-editor-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.ns-macro-editor-head h3 {
+  font-weight: 800;
+}
+
+.ns-macro-editor-head p {
+  font-size: 0.82rem;
+  color: var(--muted-foreground);
+}
+
+.ns-macro-dirty {
+  margin-left: 0.5rem;
+  color: var(--primary);
+  font-style: normal;
+  font-weight: 700;
+}
+
+.ns-macro-table {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-top: 0.6rem;
+}
+
+.ns-macro-row {
+  display: grid;
+  grid-template-columns: 2.2rem 5.5rem minmax(0, 1fr) 8.5rem 8.5rem auto;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.4rem;
+  border-radius: 8px;
+  background: var(--background);
+}
+
+.ns-macro-row-head {
+  background: transparent;
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: var(--muted-foreground);
+}
+
+.ns-macro-index {
+  font-size: 0.8rem;
+  font-weight: 800;
+  text-align: center;
+}
+
+.ns-macro-number {
+  height: 30px;
+  padding: 0 0.4rem;
+  font-weight: 700;
+}
+
+.ns-macro-stick {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.25rem;
+}
+
+.ns-macro-actions {
+  display: flex;
+}

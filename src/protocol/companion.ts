@@ -9,13 +9,28 @@ export enum CompanionCommand {
   SetMode = 0x02,
   WakeLearn = 0x03,
   WakeForget = 0x04,
+  NsSettingsRead = 0x10,
+  NsSettingsWrite = 0x11,
+  NsSettingsApply = 0x12,
+  MacroInfo = 0x20,
+  MacroRead = 0x21,
+  MacroEditBegin = 0x22,
+  MacroEditWrite = 0x23,
+  MacroEditCommit = 0x24,
 }
 
 export enum CompanionStatus {
   Ok = 0,
   UnknownCommand = 1,
   BadArgs = 2,
+  WrongMode = 3,
+  Busy = 4,
 }
+
+/** First protocol version with NS settings, macro editing and wake learning. */
+export const PROTOCOL_NS_EDIT = 2;
+/** Bytes moved per request; fits both transports. */
+export const COMPANION_CHUNK = 32;
 
 /** Firmware controller_mode values (config.h ControllerMode). */
 export enum DongleControllerMode {
@@ -49,6 +64,11 @@ export class CompanionError extends Error {
 
 const MAX_PAYLOAD = 56;
 const ATTEMPTS = 3;
+
+export interface CompanionRequest {
+  cmd: CompanionCommand;
+  payload?: ArrayLike<number>;
+}
 
 export class CompanionClient {
   private seq = 0;
@@ -87,6 +107,37 @@ export class CompanionClient {
         }
       }
       throw lastError instanceof Error ? lastError : new CompanionError(String(lastError ?? "no reply"));
+    };
+    const next = this.queue.then(run, run);
+    this.queue = next.catch(() => undefined);
+    return next;
+  }
+
+  /**
+   * Runs many requests over one open device (bulk transfers). Replies are checked
+   * like request(); the first failing request rejects the whole batch.
+   */
+  batch(requests: CompanionRequest[], timeoutMs = 600): Promise<Uint8Array[]> {
+    const run = async () => {
+      const packets = requests.map(({ cmd, payload = [] }) => {
+        if (payload.length > MAX_PAYLOAD) {
+          throw new CompanionError("payload too large");
+        }
+        const seq = (this.seq = (this.seq + 1) & 0xff);
+        return [cmd, seq, payload.length, ...Array.from(payload)];
+      });
+      const replies = await invoke<number[][]>("ds5_companion_batch", { path: this.path, requests: packets, timeoutMs });
+      return replies.map((raw, index) => {
+        const reply = new Uint8Array(raw);
+        const packet = packets[index];
+        if (reply.length < 4 || reply[0] !== packet[0] || reply[1] !== packet[1]) {
+          throw new CompanionError("unexpected reply");
+        }
+        if (reply[2] !== CompanionStatus.Ok) {
+          throw new CompanionError(`status ${reply[2]}`, reply[2]);
+        }
+        return reply.slice(4, 4 + reply[3]);
+      });
     };
     const next = this.queue.then(run, run);
     this.queue = next.catch(() => undefined);

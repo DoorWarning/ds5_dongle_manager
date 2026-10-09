@@ -1041,6 +1041,55 @@ fn companion_exchange_switch(
     Err("timeout".to_string())
 }
 
+fn companion_exchange_one(
+    device: &hidapi::HidDevice,
+    switch_mode: bool,
+    request: &[u8],
+    timeout: Duration,
+) -> Result<Vec<u8>, String> {
+    if switch_mode {
+        companion_exchange_switch(device, request, timeout)
+    } else {
+        companion_exchange_feature(device, request)
+    }
+}
+
+/// Runs several companion requests over one open device (bulk macro/settings
+/// transfers). Each request is retried a few times; the first that keeps failing
+/// aborts the batch.
+#[tauri::command]
+pub async fn ds5_companion_batch(
+    path: String,
+    requests: Vec<Vec<u8>>,
+    timeout_ms: Option<u64>,
+) -> Result<Vec<Vec<u8>>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let api = HidApi::new().map_err(error_to_string)?;
+        let device = open_device_by_path(&api, &path)?;
+        let switch_mode = is_switch_pro_path(&api, &path);
+        let timeout = Duration::from_millis(timeout_ms.unwrap_or(600));
+        let mut replies = Vec::with_capacity(requests.len());
+        for request in &requests {
+            let mut last_error = String::from("no reply");
+            let mut reply = None;
+            for _ in 0..3 {
+                match companion_exchange_one(&device, switch_mode, request, timeout) {
+                    Ok(bytes) if bytes.len() >= 2 && request.len() >= 2 && bytes[0] == request[0] && bytes[1] == request[1] => {
+                        reply = Some(bytes);
+                        break;
+                    }
+                    Ok(_) => last_error = "unexpected reply".to_string(),
+                    Err(error) => last_error = error,
+                }
+            }
+            replies.push(reply.ok_or(last_error)?);
+        }
+        Ok(replies)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 /// Sends one companion request and returns the reply packet [cmd, seq, status, len, data...].
 #[tauri::command]
 pub async fn ds5_companion_exchange(
