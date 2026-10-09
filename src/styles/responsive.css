@@ -1,11 +1,4 @@
-﻿@media (min-width: 861px) {
-  .config-panel {
-    max-height: calc(100svh - var(--app-header-height) - clamp(10px, 1.8vh, 16px) * 2);
-    overflow: clip;
-  }
-}
-
-@media (max-height: 780px) and (min-width: 861px) {
+﻿@media (max-height: 780px) and (min-width: 861px) {
   .app-shell {
     --app-header-height: 64px;
   }

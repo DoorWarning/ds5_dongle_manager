@@ -7,6 +7,8 @@ import { invoke } from "@tauri-apps/api/core";
 export enum CompanionCommand {
   GetInfo = 0x01,
   SetMode = 0x02,
+  WakeLearn = 0x03,
+  WakeForget = 0x04,
 }
 
 export enum CompanionStatus {
@@ -29,6 +31,8 @@ export interface DongleInfo {
   activeMode: DongleControllerMode;
   ds5Connected: boolean;
   wakeBeaconLearned: boolean;
+  /** Learn mode is waiting for a Joy-Con 2 beacon (60 s window). */
+  wakeLearning: boolean;
   serialBuild: boolean;
   /** 0-100 %, or null when no DualSense is connected. */
   batteryPercent: number | null;
@@ -101,12 +105,23 @@ export class CompanionClient {
       activeMode: data[2] as DongleControllerMode,
       ds5Connected: (data[3] & 0x01) !== 0,
       wakeBeaconLearned: (data[3] & 0x02) !== 0,
+      wakeLearning: (data[3] & 0x08) !== 0,
       serialBuild: (data[3] & 0x04) !== 0,
       // DualSense status nibbles: low = level 0-10, high = 0 discharging / 1 charging / 2 full.
       batteryPercent: battery === 0xff ? null : battery >> 4 === 2 ? 100 : Math.min(100, (battery & 0x0f) * 10 + 5),
       charging: battery !== 0xff && battery >> 4 === 1,
       firmware: new TextDecoder().decode(data.subarray(5)).replace(/\0+$/, ""),
     };
+  }
+
+  /** Starts (or cancels) wake beacon learn mode, same as Create + Options + Triangle. */
+  async setWakeLearning(on: boolean): Promise<void> {
+    await this.request(CompanionCommand.WakeLearn, [on ? 1 : 0]);
+  }
+
+  /** Erases the learned wake beacon. */
+  async forgetWakeBeacon(): Promise<void> {
+    await this.request(CompanionCommand.WakeForget);
   }
 
   /** The dongle saves the mode and reboots shortly after replying. */

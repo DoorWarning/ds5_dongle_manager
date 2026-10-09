@@ -12,7 +12,7 @@ import {
   normalizeConfig,
   validateConfig,
 } from "../protocol/config";
-import { DongleControllerMode, type DongleInfo } from "../protocol/companion";
+import { CompanionError, CompanionStatus, DongleControllerMode, type DongleInfo } from "../protocol/companion";
 import {
   Ds5BridgeHidClient,
   NO_DEVICE_SELECTED_ERROR,
@@ -125,6 +125,8 @@ export interface UseDs5BridgeResult {
   dismissPendingUsbReconnectPrompt: () => void;
   /** Saves the target mode on the dongle, which then reboots into it. */
   switchDongleMode: (mode: DongleMode) => Promise<boolean>;
+  setWakeLearning: (on: boolean) => Promise<void>;
+  forgetWakeBeacon: () => Promise<void>;
   resetToDefaults: () => Promise<void>;
   clearReturnHome: () => void;
   clearError: () => void;
@@ -1002,6 +1004,29 @@ export function useDs5Bridge(): UseDs5BridgeResult {
     return true;
   }, [clearConnectedDevice, startReconnectWindow, t]);
 
+  const runWakeCommand = useCallback(async (command: (target: Ds5BridgeHidClient) => Promise<void>) => {
+    const target = clientRef.current;
+    if (!target) {
+      return;
+    }
+    try {
+      await command(target);
+      await refreshDongleInfo(target);
+    } catch (cause) {
+      setError(isCompanionMissingError(cause) ? t("errors.companionUnsupported") : errorMessage(cause, t));
+    }
+  }, [refreshDongleInfo, t]);
+
+  const setWakeLearning = useCallback(
+    (on: boolean) => runWakeCommand((target) => target.companion.setWakeLearning(on)),
+    [runWakeCommand],
+  );
+
+  const forgetWakeBeacon = useCallback(
+    () => runWakeCommand((target) => target.companion.forgetWakeBeacon()),
+    [runWakeCommand],
+  );
+
   const setDraftField = useCallback(
     <Key extends keyof ConfigBody>(field: Key, value: ConfigBody[Key]) => {
       if (!clientRef.current?.device || !isDualSenseRuntimeManagementDevice(clientRef.current.device)) {
@@ -1386,6 +1411,8 @@ export function useDs5Bridge(): UseDs5BridgeResult {
     applyPendingUsbReconnect,
     dismissPendingUsbReconnectPrompt,
     switchDongleMode,
+    setWakeLearning,
+    forgetWakeBeacon,
     resetToDefaults,
     clearReturnHome: () => {
       shouldReturnHomeRef.current = false;
@@ -1546,5 +1573,9 @@ function isNotADongleError(cause: unknown): boolean {
 
 /** Pre-companion firmware stalls the 0xFA feature report, so the exchange fails outright. */
 function isCompanionMissingError(cause: unknown): boolean {
-  return !(cause instanceof Error && cause.name === "CompanionError" && "status" in cause && cause.status !== undefined);
+  if (!(cause instanceof CompanionError) || cause.status === undefined) {
+    return true;
+  }
+  // Older companion firmware answers newer commands with "unknown command".
+  return cause.status === CompanionStatus.UnknownCommand;
 }

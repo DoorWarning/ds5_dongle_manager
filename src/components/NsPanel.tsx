@@ -1,4 +1,5 @@
 import { Gamepad2, Keyboard, Power } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { useTranslation } from "react-i18next";
 import type { ReactNode } from "react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -20,6 +21,12 @@ export function NsPanel({ bridge, onProgressComplete }: NsPanelProps) {
   const { t } = useTranslation();
   const info = bridge.dongleInfo;
   const inNsMode = bridge.dongleMode === "ns";
+  // Learning works in either mode, but not on the dock (the dock limits power while the console sleeps).
+  const learning = Boolean(info?.wakeLearning);
+  const wakeDisabled = !info || bridge.operation !== null;
+  const wakeStatus = !info
+    ? "--"
+    : t(learning ? "ns.wakeLearningNow" : info.wakeBeaconLearned ? "ns.wakeLearned" : "ns.wakeNotLearned");
 
   return (
     <Card className="panel config-panel">
@@ -31,10 +38,6 @@ export function NsPanel({ bridge, onProgressComplete }: NsPanelProps) {
         <Section icon={<Gamepad2 size={17} />} title={t("ns.sections.status")} description={t("ns.sections.statusDescription")}>
           <StatusRow label={t("ns.ds5")} value={inNsMode ? t(bridge.ds5Connected ? "ns.connected" : "ns.disconnected") : "--"} />
           <StatusRow label={t("ns.battery")} value={inNsMode ? bridge.batteryText : "--"} />
-          <StatusRow
-            label={t("ns.wakeBeacon")}
-            value={info ? t(info.wakeBeaconLearned ? "ns.wakeLearned" : "ns.wakeNotLearned") : "--"}
-          />
         </Section>
 
         <Section icon={<Keyboard size={17} />} title={t("ns.sections.shortcuts")} description={t("ns.sections.shortcutsDescription")}>
@@ -45,6 +48,35 @@ export function NsPanel({ bridge, onProgressComplete }: NsPanelProps) {
         </Section>
 
         <Section icon={<Power size={17} />} title={t("ns.sections.wake")} description={t("ns.sections.wakeDescription")}>
+          <StatusRow label={t("ns.wakeBeacon")} value={wakeStatus} />
+          <div className={`control-row control-row-action ${wakeDisabled ? "is-disabled" : ""}`}>
+            <span>
+              <strong>{t(learning ? "ns.wakeLearningTitle" : "ns.wakeLearnTitle")}</strong>
+              <small>{t(learning ? "ns.wakeLearningSteps" : "ns.wakeLearnDescription")}</small>
+            </span>
+            <Button
+              type="button"
+              variant={learning ? "outline" : "secondary"}
+              disabled={wakeDisabled}
+              onClick={() => void bridge.setWakeLearning(!learning)}
+            >
+              {t(learning ? "ns.wakeLearnCancel" : "ns.wakeLearnStart")}
+            </Button>
+          </div>
+          <div className={`control-row control-row-action ${wakeDisabled || !info?.wakeBeaconLearned ? "is-disabled" : ""}`}>
+            <span>
+              <strong>{t("ns.wakeForgetTitle")}</strong>
+              <small>{t("ns.wakeForgetDescription")}</small>
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={wakeDisabled || !info?.wakeBeaconLearned}
+              onClick={() => void bridge.forgetWakeBeacon()}
+            >
+              {t("ns.wakeForget")}
+            </Button>
+          </div>
           <div className="config-tip">{t("ns.wakeHelp")}</div>
         </Section>
       </CardContent>
