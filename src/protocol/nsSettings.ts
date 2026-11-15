@@ -15,6 +15,12 @@ export const MACRO_SLOTS = 4;
 export const MACRO_EVENT_SIZE = 12;
 export const STICK_CENTER = 2048;
 const NS_SETTINGS_SIZE = 4 + NS_TRIGGER_SLOTS * (2 * NS_FFB_SIZE + 2);
+// Firmware protocol 3 appends report_ms and gyro_comp.
+const NS_SETTINGS_V3_SIZE = NS_SETTINGS_SIZE + 2;
+export const REPORT_MS_MIN = 1;
+export const REPORT_MS_MAX = 15;
+/** A real Pro Controller sends a report every 15 ms. */
+export const REPORT_MS_REAL_PRO = 15;
 
 export type TriggerSide = 0 | 1; // 0 = L2, 1 = R2
 
@@ -31,6 +37,10 @@ export interface NsSettings {
   turboMask: number;
   turboRate: number;
   slots: NsTriggerSlot[];
+  /** Report interval to the Switch; null on firmware without the setting. */
+  reportMs: number | null;
+  /** Scale gyro by reportMs / 15. */
+  gyroComp: boolean;
 }
 
 // Turbo bits, same order as the firmware's TurboBit.
@@ -60,11 +70,24 @@ export function decodeNsSettings(bytes: Uint8Array): NsSettings {
       threshold: [bytes[base + 2 * NS_FFB_SIZE], bytes[base + 2 * NS_FFB_SIZE + 1]],
     });
   }
-  return { vibPercent: bytes[0], triggerMode: bytes[1], turboMask: bytes[2], turboRate: bytes[3], slots };
+  const extended = bytes.length >= NS_SETTINGS_V3_SIZE;
+  return {
+    vibPercent: bytes[0],
+    triggerMode: bytes[1],
+    turboMask: bytes[2],
+    turboRate: bytes[3],
+    slots,
+    reportMs: extended ? bytes[NS_SETTINGS_SIZE] : null,
+    gyroComp: extended ? bytes[NS_SETTINGS_SIZE + 1] === 1 : false,
+  };
 }
 
 export function encodeNsSettings(settings: NsSettings): Uint8Array {
-  const bytes = new Uint8Array(NS_SETTINGS_SIZE);
+  const bytes = new Uint8Array(settings.reportMs === null ? NS_SETTINGS_SIZE : NS_SETTINGS_V3_SIZE);
+  if (settings.reportMs !== null) {
+    bytes[NS_SETTINGS_SIZE] = clampByte(settings.reportMs, REPORT_MS_MIN, REPORT_MS_MAX);
+    bytes[NS_SETTINGS_SIZE + 1] = settings.gyroComp ? 1 : 0;
+  }
   bytes[0] = clampByte(settings.vibPercent, 0, 100);
   bytes[1] = clampByte(settings.triggerMode, 1, NS_TRIGGER_SLOTS);
   bytes[2] = settings.turboMask & 0xff;
@@ -198,6 +221,24 @@ export function neutralMacroEvent(durMs = 100): MacroEvent {
     buttons: [0, 0, 0],
     left: { x: STICK_CENTER, y: STICK_CENTER },
     right: { x: STICK_CENTER, y: STICK_CENTER },
+  };
+}
+
+export interface LatencyInfo {
+  ds5Hz: number;
+  reportHz: number;
+  /** How old the newest DualSense input was when a report went out (average). */
+  ageMs: number;
+  usbIntervalMs: number;
+}
+
+export async function readLatency(client: CompanionClient): Promise<LatencyInfo> {
+  const d = await client.request(CompanionCommand.Latency);
+  return {
+    ds5Hz: d[0] | (d[1] << 8),
+    reportHz: d[2] | (d[3] << 8),
+    ageMs: (d[4] | (d[5] << 8)) / 1000,
+    usbIntervalMs: d[6],
   };
 }
 

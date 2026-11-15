@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { Crosshair, Gamepad2, Keyboard, ListVideo, Power, Repeat, Vibrate } from "lucide-react";
+import { Crosshair, Gamepad2, Keyboard, ListVideo, Power, Repeat, Timer, Vibrate } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -8,6 +8,9 @@ import type { UseDs5BridgeResult } from "@/hooks/useDs5Bridge";
 import {
   MACRO_SLOTS,
   NS_TRIGGER_SLOTS,
+  REPORT_MS_MAX,
+  REPORT_MS_MIN,
+  REPORT_MS_REAL_PRO,
   TURBO_BUTTONS,
   TURBO_RATE_MAX,
   TURBO_RATE_MIN,
@@ -15,6 +18,7 @@ import {
 } from "@/protocol/nsSettings";
 import { DongleModeSection } from "./config/DongleModeSection";
 import { IntegerControl } from "./config/IntegerControl";
+import { ToggleControl } from "./config/ToggleControl";
 import { MacroEditor, SLOT_SYMBOLS } from "./ns/MacroEditor";
 import { TriggerSlotEditor } from "./ns/TriggerSlotEditor";
 
@@ -33,6 +37,8 @@ const TURBO_LABELS: Record<(typeof TURBO_BUTTONS)[number]["key"], string> = {
   l2: "L2",
   r2: "R2",
 };
+
+const LATENCY_PRESETS = [REPORT_MS_REAL_PRO, 8, 5, 2, 1] as const;
 
 const SHORTCUT_KEYS = ["vibration", "trigger", "turboOn", "turboOff", "macroRecord", "macroPlay", "macroLoop", "macroStop", "modeToggle"] as const;
 
@@ -96,6 +102,60 @@ export function NsPanel({ bridge, onProgressComplete }: NsPanelProps) {
             disabled={!editable}
             onChange={(value) => update((next) => ({ ...next, vibPercent: value }))}
           />
+        </Section>
+
+        <Section icon={<Timer size={17} />} title={t("ns.sections.latency")} description={t("ns.sections.latencyDescription")}>
+          {draft && draft.reportMs === null ? (
+            <div className="config-tip">{t("latency.firmwareTooOld")}</div>
+          ) : (
+            <>
+              <div className="ns-editor-toolbar">
+                <span className="ns-editor-label">{t("latency.presets")}</span>
+                {LATENCY_PRESETS.map((ms) => (
+                  <Button
+                    key={ms}
+                    type="button"
+                    size="sm"
+                    variant={draft?.reportMs === ms ? "secondary" : "ghost"}
+                    disabled={!editable}
+                    onClick={() => update((next) => ({ ...next, reportMs: ms }))}
+                  >
+                    {t(ms === REPORT_MS_REAL_PRO ? "latency.presetReal" : "latency.presetMs", { ms })}
+                  </Button>
+                ))}
+              </div>
+              <IntegerControl
+                label={t("latency.reportMs")}
+                description={t("latency.reportMsDescription")}
+                value={draft?.reportMs ?? REPORT_MS_REAL_PRO}
+                min={REPORT_MS_MIN}
+                max={REPORT_MS_MAX}
+                disabled={!editable}
+                onChange={(value) => update((next) => ({ ...next, reportMs: value }))}
+              />
+              <ToggleControl
+                label={t("latency.gyroComp")}
+                description={t("latency.gyroCompDescription")}
+                value={draft?.gyroComp ?? false}
+                disabled={!editable || (draft?.reportMs ?? REPORT_MS_REAL_PRO) === REPORT_MS_REAL_PRO}
+                onChange={(value) => update((next) => ({ ...next, gyroComp: value }))}
+              />
+              {bridge.latency && (
+                <>
+                  <StatusRow label={t("latency.ds5Rate")} value={`${bridge.latency.ds5Hz} Hz`} />
+                  <StatusRow label={t("latency.reportRate")} value={`${bridge.latency.reportHz} Hz`} />
+                  <StatusRow label={t("latency.pressWait")} value={`${((draft?.reportMs ?? REPORT_MS_REAL_PRO) / 2).toFixed(1)} ms`} />
+                  <StatusRow label={t("latency.age")} value={`${bridge.latency.ageMs.toFixed(1)} ms`} />
+                  <StatusRow label={t("latency.usbInterval")} value={`${bridge.latency.usbIntervalMs} ms`} />
+                </>
+              )}
+              {bridge.latency && draft?.reportMs != null &&
+                (bridge.latency.usbIntervalMs === 1) !== (draft.reportMs < REPORT_MS_REAL_PRO) && (
+                <div className="config-tip">{t("latency.reconnectNeeded")}</div>
+              )}
+              <div className="config-tip">{t("latency.help")}</div>
+            </>
+          )}
         </Section>
 
         <Section icon={<Repeat size={17} />} title={t("ns.sections.turbo")} description={t("ns.sections.turboDescription")}>

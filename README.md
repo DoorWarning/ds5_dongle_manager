@@ -23,6 +23,7 @@ The app is a Tauri + React application, forked from [AizawaHikaru233/DS5-NS2Pro-
   - 4 trigger modes, each with its own L2/R2 adaptive trigger effect (preset, typed parameters or the raw 11 bytes) and the point where ZL/ZR fire;
   - saved trigger patterns;
   - turbo buttons (○✕△□, L1/R1/L2/R2) and turbo speed;
+  - response speed: the report interval to the Switch, from 15 ms (a real Pro Controller) down to 1 ms, with a live readout of the DualSense input rate, the report rate and the wait from a press to the next report (firmware `switch-v4` or later);
   - a macro editor for the 4 slots. Each step has a time, buttons and both sticks; steps can be added, inserted, duplicated, moved and deleted.
 - **Switch 2 wake beacon:** shows whether it is learned, and starts learning or forgets it.
 - Shows the DualSense battery and signal, with low-battery and connection notifications, a tray icon and autostart.

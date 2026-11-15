@@ -12,14 +12,16 @@ import {
   normalizeConfig,
   validateConfig,
 } from "../protocol/config";
-import { CompanionError, CompanionStatus, DongleControllerMode, PROTOCOL_NS_EDIT, type DongleInfo } from "../protocol/companion";
+import { CompanionError, CompanionStatus, DongleControllerMode, PROTOCOL_LATENCY, PROTOCOL_NS_EDIT, type DongleInfo } from "../protocol/companion";
 import {
   nsSettingsEqual,
   readMacro,
+  readLatency,
   readMacroInfo,
   readNsSettings,
   writeMacro,
   writeNsSettings,
+  type LatencyInfo,
   type MacroEvent,
   type MacroInfo,
   type NsSettings,
@@ -95,6 +97,8 @@ export interface UseDs5BridgeResult {
   nsDraft: NsSettings | null;
   nsSaveState: NsSaveState;
   macroInfo: MacroInfo | null;
+  /** NS mode report timing measured on the dongle (protocol 3+). */
+  latency: LatencyInfo | null;
   micActive: boolean | null;
   speakerActive: boolean | null;
   authorizedDeviceSerialNumber: Record<string, string>;
@@ -186,6 +190,7 @@ export function useDs5Bridge(): UseDs5BridgeResult {
   const [nsDraft, setNsDraftState] = useState<NsSettings | null>(null);
   const [nsSaveState, setNsSaveState] = useState<NsSaveState>("idle");
   const [macroInfo, setMacroInfo] = useState<MacroInfo | null>(null);
+  const [latency, setLatency] = useState<LatencyInfo | null>(null);
   const nsDraftRef = useRef<NsSettings | null>(null);
   const nsWriteTimerRef = useRef<number | null>(null);
   const nsWritingRef = useRef(false);
@@ -395,6 +400,7 @@ export function useDs5Bridge(): UseDs5BridgeResult {
     setNsDraftState(null);
     setNsSaveState("idle");
     setMacroInfo(null);
+    setLatency(null);
   }, []);
 
   const clearConnectedDevice = useCallback((options: { preserveConfig?: boolean; preserveReconnectTracking?: boolean } = {}) => {
@@ -613,17 +619,20 @@ export function useDs5Bridge(): UseDs5BridgeResult {
 
   // NS settings can change from the controller shortcuts too, so they are polled;
   // an edit in progress is not overwritten.
-  const refreshNsState = useCallback(async (target: Ds5BridgeHidClient) => {
+  const refreshNsState = useCallback(async (target: Ds5BridgeHidClient, protocol: number) => {
     if (macroBusyRef.current) {
       return;
     }
-    const [nextSettings, nextMacroInfo] = await Promise.all([
+    const withLatency = protocol >= PROTOCOL_LATENCY;
+    const [nextSettings, nextMacroInfo, nextLatency] = await Promise.all([
       readNsSettings(target.companion),
       readMacroInfo(target.companion),
+      withLatency ? readLatency(target.companion) : Promise.resolve(null),
     ]);
     if (clientRef.current !== target) {
       return;
     }
+    setLatency(nextLatency);
     setMacroInfo(nextMacroInfo);
     setNsSettings((current) => nsSettingsEqual(current, nextSettings) ? current : nextSettings);
     if (nsWriteTimerRef.current === null && !nsWritingRef.current) {
@@ -658,7 +667,7 @@ export function useDs5Bridge(): UseDs5BridgeResult {
     if (target.isSwitchMode) {
       setSignalStrength("--");
       if (info && info.protocol >= PROTOCOL_NS_EDIT) {
-        await refreshNsState(target);
+        await refreshNsState(target, info.protocol);
       }
       return;
     }
@@ -1507,6 +1516,7 @@ export function useDs5Bridge(): UseDs5BridgeResult {
     nsDraft,
     nsSaveState,
     macroInfo,
+    latency,
     micActive,
     speakerActive,
     authorizedDeviceSerialNumber,

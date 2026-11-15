@@ -17,6 +17,7 @@ export enum CompanionCommand {
   MacroEditBegin = 0x22,
   MacroEditWrite = 0x23,
   MacroEditCommit = 0x24,
+  Latency = 0x30,
 }
 
 export enum CompanionStatus {
@@ -29,6 +30,8 @@ export enum CompanionStatus {
 
 /** First protocol version with NS settings, macro editing and wake learning. */
 export const PROTOCOL_NS_EDIT = 2;
+/** First protocol version with the report cadence setting and latency readout. */
+export const PROTOCOL_LATENCY = 3;
 /** Bytes moved per request; fits both transports. */
 export const COMPANION_CHUNK = 32;
 
