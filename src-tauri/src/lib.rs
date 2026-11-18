@@ -13,7 +13,7 @@ use commands::{
     ds5_get_controller_low_battery_popup_enabled,
     ds5_get_controller_notification_popup_duration_ms,
     ds5_get_controller_notification_sound_enabled, ds5_get_controller_notification_sound_volumes,
-    ds5_get_low_battery_notification_enabled, ds5_get_software_settings, ds5_companion_batch, ds5_companion_exchange, ds5_get_system_info, ds5_get_tray_batteries,
+    ds5_get_low_battery_notification_enabled, ds5_get_software_settings, ds5_companion_batch, ds5_companion_exchange, ds5_get_system_info, ds5_read_text_file, ds5_write_text_file, ds5_get_tray_batteries,
     ds5_hide_controller_notification, ds5_hide_tray_popup, ds5_list_devices,
     ds5_make_controller_notification_input_safe, ds5_open_main_window,
     ds5_play_controller_notification_sound, ds5_quit_app, ds5_read_feature_report,
@@ -65,6 +65,7 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             if let Err(error) =
                 commands::sync_close_to_tray_state(&app.handle(), &app.state::<TrayState>())
@@ -212,6 +213,8 @@ pub fn run() {
             ds5_read_feature_report,
             ds5_send_feature_report,
             ds5_companion_batch,
+            ds5_read_text_file,
+            ds5_write_text_file,
             ds5_companion_exchange,
             ds5_read_input_report,
             ds5_update_tray_batteries,

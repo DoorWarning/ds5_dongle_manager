@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, Copy, LoaderCircle, Plus, RotateCcw, Save, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Copy, Download, LoaderCircle, Plus, RotateCcw, Save, Trash2, Upload, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { UseDs5BridgeResult } from "@/hooks/useDs5Bridge";
+import { MacroTransferDialog } from "./MacroTransferDialog";
 import {
   STICK_CENTER,
   SWITCH_BUTTONS,
@@ -49,6 +50,7 @@ export function MacroEditor({ bridge, slot, onClose }: MacroEditorProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [closeArmed, setCloseArmed] = useState(false);
+  const [transfer, setTransfer] = useState<"export" | "import" | null>(null);
   const maxEvents = bridge.macroInfo?.maxEvents ?? 340;
   const dirty = loaded !== null && JSON.stringify(loaded) !== JSON.stringify(events);
   const totalMs = useMemo(() => events.reduce((sum, event) => sum + event.durMs, 0), [events]);
@@ -146,6 +148,12 @@ export function MacroEditor({ bridge, slot, onClose }: MacroEditorProps) {
           <Button type="button" size="sm" variant="outline" disabled={busy || (loaded?.length ?? 0) === 0}
             onClick={() => void save([])}>
             <Trash2 size={14} />{t("macro.clearSlot")}
+          </Button>
+          <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => setTransfer("import")}>
+            <Upload size={14} />{t("macroFile.import")}
+          </Button>
+          <Button type="button" size="sm" variant="outline" disabled={busy || events.length === 0} onClick={() => setTransfer("export")}>
+            <Download size={14} />{t("macroFile.export")}
           </Button>
           <Button type="button" size="sm" disabled={busy || !dirty} onClick={() => void save(events)}>
             {saving ? <LoaderCircle size={14} className="animate-spin" /> : <Save size={14} />}
@@ -245,6 +253,17 @@ export function MacroEditor({ bridge, slot, onClose }: MacroEditorProps) {
         </div>
       )}
       <p className="config-tip">{t("macro.editorHelp")}</p>
+      <MacroTransferDialog
+        mode={transfer}
+        slot={slot}
+        events={events}
+        maxEvents={maxEvents}
+        onImport={(imported) => {
+          setEvents(imported);
+          setCloseArmed(false);
+        }}
+        onClose={() => setTransfer(null)}
+      />
     </section>
   );
 }

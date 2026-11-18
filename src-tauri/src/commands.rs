@@ -1177,3 +1177,39 @@ pub async fn ds5_companion_exchange(
     .await
     .map_err(|error| error.to_string())?
 }
+
+// Macro import/export: the path comes from the native open/save dialog. Only
+// small .json files, so these cannot be used to read or overwrite anything else.
+const TEXT_FILE_MAX_BYTES: u64 = 1024 * 1024;
+
+fn check_text_file_path(path: &str) -> Result<PathBuf, String> {
+    let path = PathBuf::from(path);
+    let is_json = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("json"))
+        .unwrap_or(false);
+    if !is_json {
+        return Err("only .json files are supported".to_string());
+    }
+    Ok(path)
+}
+
+#[tauri::command]
+pub fn ds5_read_text_file(path: String) -> Result<String, String> {
+    let path = check_text_file_path(&path)?;
+    let size = fs::metadata(&path).map_err(error_to_string)?.len();
+    if size > TEXT_FILE_MAX_BYTES {
+        return Err("file is too large".to_string());
+    }
+    fs::read_to_string(&path).map_err(error_to_string)
+}
+
+#[tauri::command]
+pub fn ds5_write_text_file(path: String, contents: String) -> Result<(), String> {
+    let path = check_text_file_path(&path)?;
+    if contents.len() as u64 > TEXT_FILE_MAX_BYTES {
+        return Err("contents are too large".to_string());
+    }
+    fs::write(&path, contents).map_err(error_to_string)
+}

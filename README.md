@@ -25,6 +25,7 @@ The app is a Tauri + React application, forked from [AizawaHikaru233/DS5-NS2Pro-
   - turbo buttons (○✕△□, L1/R1/L2/R2) and turbo speed;
   - response speed: the report interval to the Switch, from 15 ms (a real Pro Controller) down to 1 ms, with a live readout of the DualSense input rate, the report rate and the wait from a press to the next report (firmware `switch-v4` or later);
   - a macro editor for the 4 slots. Each step has a time, buttons and both sticks; steps can be added, inserted, duplicated, moved and deleted.
+  - macro export/import as text (copy and paste) or a .json file.
 - **Switch 2 wake beacon:** shows whether it is learned, and starts learning or forgets it.
 - **Charging dock** (firmware `switch-v5` or later): disconnect the DualSense when it goes on its charging dock (PC and NS mode), and in NS mode put the Switch to sleep first.
 - Both settings pages share one layout: a status bar (mode, DualSense, battery, signal, save state) and tabs.
