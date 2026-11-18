@@ -1,6 +1,9 @@
 // Mirrors Config_body in ds5_dongle/src/config.h (packed, little-endian).
 // Field order and ranges follow ds5_dongle/tools/config_tool.py FIELDS and config_valid().
+// switch-v5 appends three bytes in upstream's order (packet_mode, disconnect_on_dock,
+// sleep_on_dock); older firmware returns 22 bytes and ignores extra bytes on write.
 export const CONFIG_BODY_SIZE = 22;
+export const CONFIG_BODY_SIZE_V5 = 25;
 export const FEATURE_REPORT_PAYLOAD_SIZE = 63;
 export const CONFIG_VERSION = 5;
 export const STATUS_GPIO_DISABLED = 255;
@@ -30,6 +33,12 @@ export interface ConfigBody {
   lockVolume: boolean;
   statusGpioPin: number;
   statusGpioMode: StatusGpioMode;
+  /** Upstream audio packet mode; stored by the firmware, not used by it yet. */
+  packetMode: number;
+  /** Disconnect the DualSense when it is put on its charging dock (switch-v5+). */
+  disconnectOnDock: boolean;
+  /** Upstream PC sleep on dock; stored by the firmware, not used by it yet. */
+  sleepOnDock: number;
 }
 
 export interface ConfigValidationIssue {
@@ -57,6 +66,9 @@ export const DEFAULT_CONFIG: ConfigBody = {
   lockVolume: false,
   statusGpioPin: STATUS_GPIO_DISABLED,
   statusGpioMode: 0,
+  packetMode: 0,
+  disconnectOnDock: false,
+  sleepOnDock: 0,
 };
 
 export const POLLING_RATE_OPTIONS: Array<{ value: PollingRateMode; label: string }> = [
@@ -114,7 +126,7 @@ export function encodeConfigBody(config: ConfigBody): Uint8Array<ArrayBuffer> {
     });
   }
 
-  const bytes = new Uint8Array(new ArrayBuffer(CONFIG_BODY_SIZE));
+  const bytes = new Uint8Array(new ArrayBuffer(CONFIG_BODY_SIZE_V5));
   const view = new DataView(bytes.buffer);
   view.setUint8(0, config.configVersion);
   view.setFloat32(1, config.hapticsGain, true);
@@ -135,6 +147,9 @@ export function encodeConfigBody(config: ConfigBody): Uint8Array<ArrayBuffer> {
   view.setUint8(19, config.lockVolume ? 1 : 0);
   view.setUint8(20, config.statusGpioPin);
   view.setUint8(21, config.statusGpioMode);
+  view.setUint8(22, config.packetMode);
+  view.setUint8(23, config.disconnectOnDock ? 1 : 0);
+  view.setUint8(24, config.sleepOnDock);
   return bytes;
 }
 
@@ -164,6 +179,8 @@ export function validateConfig(config: ConfigBody): ConfigValidationIssue[] {
     config.statusGpioPin === STATUS_GPIO_DISABLED || STATUS_GPIO_PINS.includes(config.statusGpioPin),
   );
   check("statusGpioMode", intIn(config.statusGpioMode, 0, 1));
+  check("packetMode", intIn(config.packetMode, 0, 1));
+  check("sleepOnDock", intIn(config.sleepOnDock, 0, 1));
 
   return issues;
 }
@@ -189,6 +206,9 @@ export function normalizeConfig(config: ConfigBody): ConfigBody {
     lockVolume: Boolean(config.lockVolume),
     statusGpioPin: STATUS_GPIO_PINS.includes(config.statusGpioPin) ? config.statusGpioPin : STATUS_GPIO_DISABLED,
     statusGpioMode: clampInteger(config.statusGpioMode, 0, 1) as StatusGpioMode,
+    packetMode: clampInteger(config.packetMode ?? 0, 0, 1),
+    disconnectOnDock: Boolean(config.disconnectOnDock),
+    sleepOnDock: clampInteger(config.sleepOnDock ?? 0, 0, 1),
   };
 }
 
@@ -241,7 +261,20 @@ function decodeAt(bytes: Uint8Array, offset: number): ConfigBody {
     lockVolume: view.getUint8(19) === 1,
     statusGpioPin: view.getUint8(20),
     statusGpioMode: view.getUint8(21) as StatusGpioMode,
+    ...decodeV5Tail(bytes, offset),
   };
+}
+
+// Older firmware sends only 22 bytes: the v5 fields then read as off.
+function decodeV5Tail(bytes: Uint8Array, offset: number): Pick<ConfigBody, "packetMode" | "disconnectOnDock" | "sleepOnDock"> {
+  if (bytes.byteLength < offset + CONFIG_BODY_SIZE_V5) {
+    return { packetMode: 0, disconnectOnDock: false, sleepOnDock: 0 };
+  }
+  const tail = (index: number) => {
+    const value = bytes[offset + index];
+    return value <= 1 ? value : 0;
+  };
+  return { packetMode: tail(22), disconnectOnDock: tail(23) === 1, sleepOnDock: tail(24) };
 }
 
 // hidapi returns the report id first; tolerate payloads with or without it.

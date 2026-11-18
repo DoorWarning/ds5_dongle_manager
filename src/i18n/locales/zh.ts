@@ -170,6 +170,14 @@ export const zh = {
     firmwareGithub: "固件 GitHub 地址",
   },
   config: {
+    tabs: {
+      general: "常规",
+      audio: "振动 · 音频",
+      system: "PC 联动 · 节能",
+      gpio: "状态 GPIO",
+    },
+    disconnectOnDock: "放上充电座时断开",
+    disconnectOnDockDescription: "把 DualSense 放到充电座上时断开连接以节省电量。PC 模式和 NS 模式都有效。",
     title: "PC 模式设置",
     pcOnlyNotice: "这些设置保存在接收器中，只能在 PC 模式下读取和修改。",
     sections: {
@@ -249,6 +257,17 @@ export const zh = {
     switchingProgress: "{{progress}}%",
   },
   ns: {
+    sleepConsoleOnDock: "放上充电座时让 Switch 进入睡眠",
+    sleepConsoleOnDockDescription: "把 DualSense 放到充电座上时，接收器会长按 HOME 并选择睡眠模式。若同时开启上面的选项，之后会断开 DualSense。",
+    tabs: {
+      general: "常规",
+      trigger: "扳机",
+      turboMacro: "连发 · 宏",
+      wake: "Switch 2 唤醒",
+      shortcuts: "快捷键",
+    },
+    dockUnavailable: "在 NS 模式下且固件为 switch-v5 或更新时可用。",
+    latencyWaiting: "接收器以 NS 模式连接到这台电脑后会显示实时数值。",
     firmwareTooOld: "此固件不支持在软件中修改 NS 设置，请更新接收器固件。",
     saveState: {
       idle: "修改会自动保存到接收器。",
@@ -260,6 +279,8 @@ export const zh = {
     vibrationDescription: "发送给 DualSense 的 HD 振动强度。0 = 关闭（省电）。静音 + ↑/↓ 每次调整 20%。",
     pcModeNotice: "接收器处于 PC 模式。切换到 NS 模式后下面的状态才会更新。",
     sections: {
+      dock: "充电座",
+      dockDescription: "把 DualSense 放到充电座上时的动作。",
       latency: "响应速度",
       latencyDescription: "接收器向 Switch 发送输入的间隔。正版 Pro 手柄每 15 毫秒发送一次。",
       vibration: "振动",
@@ -420,6 +441,8 @@ export const zh = {
     disabled: "已关闭",
   },
   validation: {
+    packetMode: "保存的音频包模式无效",
+    sleepOnDock: "保存的充电座休眠值无效",
     configVersion: "接收器的设置版本不同，请更新软件或固件。",
     hapticsGain: "振动强度需要在 100% 到 200% 之间",
     speakerVolume: "扬声器音量需要在 0 到 127 之间",

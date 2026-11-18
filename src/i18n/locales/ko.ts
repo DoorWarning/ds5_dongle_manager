@@ -170,6 +170,14 @@ export const ko = {
     firmwareGithub: "펌웨어 GitHub",
   },
   config: {
+    tabs: {
+      general: "일반",
+      audio: "햅틱 · 오디오",
+      system: "PC 연동 · 절전",
+      gpio: "상태 GPIO",
+    },
+    disconnectOnDock: "충전 거치대에 올리면 연결 끊기",
+    disconnectOnDockDescription: "DualSense를 충전 거치대에 올리면 연결을 끊어 배터리를 아낍니다. PC 모드와 NS 모드 모두 적용됩니다.",
     title: "PC 모드 설정",
     pcOnlyNotice: "이 설정은 동글에 저장되며 PC 모드에서만 읽고 바꿀 수 있습니다.",
     sections: {
@@ -249,6 +257,17 @@ export const ko = {
     switchingProgress: "{{progress}}%",
   },
   ns: {
+    sleepConsoleOnDock: "충전 거치대에 올리면 스위치 본체 절전",
+    sleepConsoleOnDockDescription: "DualSense를 충전 거치대에 올리면 동글이 HOME을 길게 눌러 절전 모드를 고릅니다. 위 옵션도 켜 두면 그다음 DualSense 연결을 끊습니다.",
+    tabs: {
+      general: "일반",
+      trigger: "트리거",
+      turboMacro: "연사 · 매크로",
+      wake: "스위치 2 깨우기",
+      shortcuts: "단축키",
+    },
+    dockUnavailable: "NS 모드에서 펌웨어 switch-v5 이상일 때 쓸 수 있습니다.",
+    latencyWaiting: "동글이 NS 모드로 이 PC에 연결되면 실시간 수치가 표시됩니다.",
     firmwareTooOld: "이 펌웨어는 앱에서 NS 설정을 바꿀 수 없습니다. 동글 펌웨어를 업데이트하세요.",
     saveState: {
       idle: "바꾼 내용은 동글에 자동으로 저장됩니다.",
@@ -260,6 +279,8 @@ export const ko = {
     vibrationDescription: "DualSense로 보내는 HD 진동의 세기입니다. 0 = 끔(배터리 절약). 음소거 + ↑/↓는 20%씩 바꿉니다.",
     pcModeNotice: "동글이 PC 모드입니다. 아래 상태는 NS 모드로 전환한 뒤에 갱신됩니다.",
     sections: {
+      dock: "충전 거치대",
+      dockDescription: "DualSense를 충전 거치대에 올렸을 때의 동작입니다.",
       latency: "응답 속도",
       latencyDescription: "동글이 스위치로 입력을 보내는 주기입니다. 정품 프로콘은 15ms마다 보냅니다.",
       vibration: "진동",
@@ -420,6 +441,8 @@ export const ko = {
     disabled: "꺼짐",
   },
   validation: {
+    packetMode: "저장된 오디오 패킷 모드 값이 올바르지 않습니다",
+    sleepOnDock: "저장된 거치대 절전 값이 올바르지 않습니다",
     configVersion: "동글의 설정 버전이 다릅니다. 매니저나 펌웨어를 업데이트하세요.",
     hapticsGain: "햅틱 세기는 100%~200%여야 합니다",
     speakerVolume: "스피커 음량은 0~127이어야 합니다",

@@ -170,6 +170,14 @@ export const en = {
     firmwareGithub: "Firmware GitHub URL",
   },
   config: {
+    tabs: {
+      general: "General",
+      audio: "Haptics · Audio",
+      system: "PC · Power",
+      gpio: "Status GPIO",
+    },
+    disconnectOnDock: "Disconnect on the charging dock",
+    disconnectOnDockDescription: "When the DualSense is put on its charging dock, disconnect it to save its battery. Works in PC and NS mode.",
     title: "PC mode settings",
     pcOnlyNotice: "These settings are stored on the dongle and can only be read or changed in PC mode.",
     sections: {
@@ -249,6 +257,17 @@ export const en = {
     switchingProgress: "{{progress}}%",
   },
   ns: {
+    sleepConsoleOnDock: "Put the Switch to sleep on the charging dock",
+    sleepConsoleOnDockDescription: "When the DualSense goes on its charging dock, the dongle holds HOME and picks Sleep Mode. With the option above on, the DualSense disconnects after that.",
+    tabs: {
+      general: "General",
+      trigger: "Triggers",
+      turboMacro: "Turbo · Macros",
+      wake: "Switch 2 wake",
+      shortcuts: "Shortcuts",
+    },
+    dockUnavailable: "Available in NS mode with firmware switch-v5 or later.",
+    latencyWaiting: "The live figures appear once the dongle is in NS mode on this PC.",
     firmwareTooOld: "This firmware cannot edit NS settings from the app. Update the dongle firmware.",
     saveState: {
       idle: "Changes are saved to the dongle automatically.",
@@ -260,6 +279,8 @@ export const en = {
     vibrationDescription: "Scales the HD rumble sent to the DualSense. 0 = off (saves battery). Mute + ↑/↓ moves in 20 % steps.",
     pcModeNotice: "The dongle is in PC mode. The status below updates after switching to NS mode.",
     sections: {
+      dock: "Charging dock",
+      dockDescription: "What happens when the DualSense is put on its charging dock.",
       latency: "Response speed",
       latencyDescription: "How often the dongle sends input to the Switch. A real Pro Controller sends every 15 ms.",
       vibration: "Vibration",
@@ -420,6 +441,8 @@ export const en = {
     disabled: "Disabled",
   },
   validation: {
+    packetMode: "The stored audio packet mode is invalid",
+    sleepOnDock: "The stored sleep-on-dock value is invalid",
     configVersion: "The dongle uses a different settings version. Update the manager or the firmware.",
     hapticsGain: "Haptics strength must be between 100% and 200%",
     speakerVolume: "Speaker volume must be between 0 and 127",

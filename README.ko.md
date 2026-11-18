@@ -26,6 +26,8 @@ Tauri + React 앱이며, [AizawaHikaru233/DS5-NS2Pro-Dongle-Manager](https://git
   - 응답 속도: 스위치로 보내는 보고 주기를 15ms(정품 프로콘)부터 1ms까지 조절. DualSense 입력 Hz, 보낸 보고 Hz, 누른 뒤 다음 보고까지 대기 시간을 실시간 표시 (펌웨어 `switch-v4` 이상)
   - 매크로 편집기: 슬롯 4개, 단계마다 시간·버튼·양쪽 스틱. 단계 추가·삽입·복제·이동·삭제
 - **스위치 2 깨우기 비컨:** 학습 여부 표시, 학습 시작, 지우기
+- **충전 거치대** (펌웨어 `switch-v5` 이상): DualSense를 충전 거치대에 올리면 연결 끊기(PC/NS 모드), NS 모드에서는 먼저 스위치 본체 절전
+- PC/NS 설정 화면이 같은 구성: 상단 상태 표시줄(모드, DualSense, 배터리, 신호, 저장 상태)과 탭
 - DualSense 배터리와 신호 표시, 배터리 부족·연결 알림, 트레이, 자동 실행
 - 앱과 펌웨어 새 버전 확인 (GitHub)
 
@@ -33,7 +35,7 @@ Tauri + React 앱이며, [AizawaHikaru233/DS5-NS2Pro-Dongle-Manager](https://git
 
 ## 필요한 것
 
-- 펌웨어 **`switch-v3` 이상** ([DS5Dongle_switch2 릴리스](https://github.com/DoorWarning/DS5Dongle_switch2/releases))
+- 모든 기능은 펌웨어 **`switch-v5` 이상** (2.2.0부터 동글과 Feature 보고서 `0xFE`로 통신하며, `switch-v3`/`v4`는 예전 `0xFA`로 계속 동작) ([DS5Dongle_switch2 릴리스](https://github.com/DoorWarning/DS5Dongle_switch2/releases))
   - 이전 펌웨어에서는 상태 표시와 PC 설정만 됩니다. 모드 전환과 NS 설정 편집은 안 됩니다.
 - NS 설정과 매크로는 동글이 **NS 모드로 PC에 꽂혀 있을 때만** 편집할 수 있습니다. 앱에서 NS 모드로 전환해 편집한 뒤 동글을 독으로 옮기면 됩니다.
 - Windows 10/11, WebView2 런타임

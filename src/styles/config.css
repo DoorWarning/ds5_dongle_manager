@@ -831,3 +831,199 @@
 .ns-macro-actions {
   display: flex;
 }
+
+/* NS page layout */
+.ns-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.ns-status-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.ns-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--color-background-card-6);
+  color: var(--muted-foreground);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.ns-chip.is-on {
+  border-color: var(--primary);
+  color: var(--foreground);
+}
+
+.ns-notice {
+  padding: 0.55rem 0.75rem;
+  border-radius: 0.5rem;
+  background: var(--color-background-card-6);
+}
+
+.config-sections > .ns-wide {
+  grid-column: 1 / -1;
+}
+
+.ns-two-column {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.9rem;
+  align-items: start;
+}
+
+.ns-column {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.ns-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.4rem;
+}
+
+.ns-stats-single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.ns-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 0.5rem;
+  background: var(--background);
+}
+
+.ns-stat span {
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.ns-stat strong {
+  font-size: 1.25rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.ns-stat em {
+  margin-left: 0.25rem;
+  color: var(--muted-foreground);
+  font-size: 0.8rem;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.ns-turbo-button {
+  min-width: 2.75rem;
+  height: 2.25rem;
+  font-size: 0.9rem;
+}
+
+.ns-slot-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.ns-slot-card {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  background: var(--background);
+  text-align: left;
+  transition: border-color 120ms ease;
+}
+
+.ns-slot-card:hover:not(:disabled) {
+  border-color: var(--primary);
+}
+
+.ns-slot-card:disabled {
+  opacity: 0.5;
+}
+
+.ns-slot-symbol {
+  display: grid;
+  width: 2.4rem;
+  height: 2.4rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--color-background-card-6);
+  font-size: 1.2rem;
+  font-weight: 800;
+}
+
+.ns-slot-card.has-steps .ns-slot-symbol {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.ns-slot-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ns-slot-copy strong {
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.ns-slot-copy small {
+  color: var(--muted-foreground);
+  font-size: 0.78rem;
+}
+
+.ns-shortcut-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.4rem;
+}
+
+.ns-shortcut-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 0.5rem;
+  background: var(--background);
+}
+
+.ns-shortcut-row kbd {
+  align-self: flex-start;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 0.35rem;
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.ns-shortcut-row span {
+  font-size: 0.86rem;
+}
+
+@media (max-width: 1200px) {
+  .ns-two-column,
+  .ns-shortcut-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

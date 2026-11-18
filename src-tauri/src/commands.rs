@@ -971,7 +971,11 @@ impl From<SoftwareSettings> for SoftwareSettingsDto {
 // 0x21, from byte 14 of the report data.
 const NINTENDO_VENDOR_ID: u16 = 0x057e;
 const SWITCH_PRO_PRODUCT_ID: u16 = 0x2009;
-const COMPANION_REPORT_ID: u8 = 0xfa;
+// Firmware switch-v5+: report 0xFE, requests prefixed with "DW". Older firmware
+// (switch-v3/v4) used 0xFA, which upstream now uses for button remapping.
+const COMPANION_REPORT_ID: u8 = 0xfe;
+const COMPANION_MAGIC: [u8; 2] = *b"DW";
+const COMPANION_LEGACY_REPORT_ID: u8 = 0xfa;
 const COMPANION_FEATURE_SIZE: usize = 63;
 const COMPANION_SUBCOMMAND: u8 = 0xe0;
 const SWITCH_OUTPUT_REPORT_SIZE: usize = 63; // report 0x01 data, per the dongle's descriptor
@@ -987,21 +991,84 @@ fn is_switch_pro_path(api: &HidApi, path: &str) -> bool {
     })
 }
 
-fn companion_exchange_feature(device: &hidapi::HidDevice, request: &[u8]) -> Result<Vec<u8>, String> {
+fn companion_feature_roundtrip(
+    device: &hidapi::HidDevice,
+    report_id: u8,
+    prefix: &[u8],
+    request: &[u8],
+) -> Result<Vec<u8>, String> {
     let mut out = vec![0_u8; COMPANION_FEATURE_SIZE + 1];
-    out[0] = COMPANION_REPORT_ID;
-    let len = request.len().min(COMPANION_FEATURE_SIZE);
-    out[1..1 + len].copy_from_slice(&request[..len]);
+    out[0] = report_id;
+    let len = request.len().min(COMPANION_FEATURE_SIZE - prefix.len());
+    out[1..1 + prefix.len()].copy_from_slice(prefix);
+    out[1 + prefix.len()..1 + prefix.len() + len].copy_from_slice(&request[..len]);
     device.send_feature_report(&out).map_err(error_to_string)?;
 
     let mut reply = vec![0_u8; COMPANION_FEATURE_SIZE + 1];
-    reply[0] = COMPANION_REPORT_ID;
+    reply[0] = report_id;
     let count = device.get_feature_report(&mut reply).map_err(error_to_string)?;
     reply.truncate(count);
-    if reply.first() == Some(&COMPANION_REPORT_ID) {
+    if reply.first() == Some(&report_id) {
         reply.remove(0);
     }
     Ok(reply)
+}
+
+fn companion_reply_matches(reply: &[u8], request: &[u8]) -> bool {
+    reply.len() >= 2 && request.len() >= 2 && reply[0] == request[0] && reply[1] == request[1]
+}
+
+const FIRMWARE_VERSION_REPORT_ID: u8 = 0xf8;
+
+/// Which companion report each device path answered on, so the fallback probe
+/// runs once per device.
+fn companion_report_cache() -> &'static std::sync::Mutex<std::collections::HashMap<String, u8>> {
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, u8>>> =
+        std::sync::OnceLock::new();
+    CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+/// 0xFA belongs to upstream's button remapping, so only fall back to it on our
+/// own older firmware (version string "switch-..."), never on upstream firmware.
+fn is_legacy_companion_firmware(device: &hidapi::HidDevice) -> bool {
+    let mut buffer = vec![0_u8; COMPANION_FEATURE_SIZE + 1];
+    buffer[0] = FIRMWARE_VERSION_REPORT_ID;
+    let Ok(count) = device.get_feature_report(&mut buffer) else {
+        return false;
+    };
+    let start = if buffer.first() == Some(&FIRMWARE_VERSION_REPORT_ID) { 1 } else { 0 };
+    let text = String::from_utf8_lossy(&buffer[start..count.max(start)]);
+    text.trim_matches(char::from(0)).trim().starts_with("switch-")
+}
+
+/// Tries the current report (0xFE + magic) first and falls back to the 0xFA
+/// report of switch-v3/v4. A device only declares one of the two, so the other
+/// fails at once.
+fn companion_exchange_feature(device: &hidapi::HidDevice, path: &str, request: &[u8]) -> Result<Vec<u8>, String> {
+    let cached = companion_report_cache().lock().ok().and_then(|cache| cache.get(path).copied());
+    if cached == Some(COMPANION_LEGACY_REPORT_ID) {
+        return companion_feature_roundtrip(device, COMPANION_LEGACY_REPORT_ID, &[], request);
+    }
+
+    let current = companion_feature_roundtrip(device, COMPANION_REPORT_ID, &COMPANION_MAGIC, request);
+    if matches!(&current, Ok(reply) if companion_reply_matches(reply, request)) {
+        if let Ok(mut cache) = companion_report_cache().lock() {
+            cache.insert(path.to_string(), COMPANION_REPORT_ID);
+        }
+        return current;
+    }
+    if cached == Some(COMPANION_REPORT_ID) || !is_legacy_companion_firmware(device) {
+        return current;
+    }
+    match companion_feature_roundtrip(device, COMPANION_LEGACY_REPORT_ID, &[], request) {
+        Ok(reply) if companion_reply_matches(&reply, request) => {
+            if let Ok(mut cache) = companion_report_cache().lock() {
+                cache.insert(path.to_string(), COMPANION_LEGACY_REPORT_ID);
+            }
+            Ok(reply)
+        }
+        legacy => current.or(legacy),
+    }
 }
 
 fn companion_exchange_switch(
@@ -1043,6 +1110,7 @@ fn companion_exchange_switch(
 
 fn companion_exchange_one(
     device: &hidapi::HidDevice,
+    path: &str,
     switch_mode: bool,
     request: &[u8],
     timeout: Duration,
@@ -1050,7 +1118,7 @@ fn companion_exchange_one(
     if switch_mode {
         companion_exchange_switch(device, request, timeout)
     } else {
-        companion_exchange_feature(device, request)
+        companion_exchange_feature(device, path, request)
     }
 }
 
@@ -1073,7 +1141,7 @@ pub async fn ds5_companion_batch(
             let mut last_error = String::from("no reply");
             let mut reply = None;
             for _ in 0..3 {
-                match companion_exchange_one(&device, switch_mode, request, timeout) {
+                match companion_exchange_one(&device, &path, switch_mode, request, timeout) {
                     Ok(bytes) if bytes.len() >= 2 && request.len() >= 2 && bytes[0] == request[0] && bytes[1] == request[1] => {
                         reply = Some(bytes);
                         break;
@@ -1103,7 +1171,7 @@ pub async fn ds5_companion_exchange(
         if is_switch_pro_path(&api, &path) {
             companion_exchange_switch(&device, &request, Duration::from_millis(timeout_ms.unwrap_or(600)))
         } else {
-            companion_exchange_feature(&device, &request)
+            companion_exchange_feature(&device, &path, &request)
         }
     })
     .await

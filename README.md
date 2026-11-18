@@ -26,6 +26,8 @@ The app is a Tauri + React application, forked from [AizawaHikaru233/DS5-NS2Pro-
   - response speed: the report interval to the Switch, from 15 ms (a real Pro Controller) down to 1 ms, with a live readout of the DualSense input rate, the report rate and the wait from a press to the next report (firmware `switch-v4` or later);
   - a macro editor for the 4 slots. Each step has a time, buttons and both sticks; steps can be added, inserted, duplicated, moved and deleted.
 - **Switch 2 wake beacon:** shows whether it is learned, and starts learning or forgets it.
+- **Charging dock** (firmware `switch-v5` or later): disconnect the DualSense when it goes on its charging dock (PC and NS mode), and in NS mode put the Switch to sleep first.
+- Both settings pages share one layout: a status bar (mode, DualSense, battery, signal, save state) and tabs.
 - Shows the DualSense battery and signal, with low-battery and connection notifications, a tray icon and autostart.
 - Checks GitHub for new versions of the app and the firmware.
 
@@ -33,7 +35,7 @@ The controller shortcuts (Mute + D-pad, Mute + double tap and so on) change the 
 
 ## Requirements
 
-- Firmware **`switch-v3` or later** from [DS5Dongle_switch2 releases](https://github.com/DoorWarning/DS5Dongle_switch2/releases).
+- Firmware **`switch-v5` or later** for everything (from 2.2.0 the manager talks to the dongle on Feature report `0xFE`; `switch-v3`/`v4` still work over the old `0xFA`), from [DS5Dongle_switch2 releases](https://github.com/DoorWarning/DS5Dongle_switch2/releases).
   - Older firmware still shows status and PC settings, but cannot switch modes or edit NS settings.
 - NS settings and macros can only be edited while the dongle is **in NS mode and plugged into the PC**. Switch modes from the app, edit, then move the dongle back to the dock.
 - Windows 10/11 with the WebView2 Runtime.

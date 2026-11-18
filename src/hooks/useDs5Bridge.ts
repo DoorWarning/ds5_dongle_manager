@@ -12,7 +12,7 @@ import {
   normalizeConfig,
   validateConfig,
 } from "../protocol/config";
-import { CompanionError, CompanionStatus, DongleControllerMode, PROTOCOL_LATENCY, PROTOCOL_NS_EDIT, type DongleInfo } from "../protocol/companion";
+import { CompanionError, CompanionStatus, DongleControllerMode, PROTOCOL_DOCK, PROTOCOL_LATENCY, PROTOCOL_NS_EDIT, type DockSettings, type DongleInfo } from "../protocol/companion";
 import {
   nsSettingsEqual,
   readMacro,
@@ -52,6 +52,8 @@ const BATTERY_REFRESH_INTERVAL_MS = 60_000;
 const DEVICE_DISCOVERY_FALLBACK_INTERVAL_MS = 30_000;
 const PICO_INFO_REFRESH_INTERVAL_MS = 1_000;
 const NS_INFO_REFRESH_INTERVAL_MS = 2_000;
+// After a failed companion request in PC mode, wait this long before asking again.
+const COMPANION_RETRY_MS = 5_000;
 const CONNECTED_DEVICE_MISSING_GRACE_MS = 3_000;
 const CONTROLLER_CONNECTION_NOTIFICATION_STABLE_MS = 900;
 const BATTERY_LISTEN_TIMEOUT_MS = 300;
@@ -99,6 +101,8 @@ export interface UseDs5BridgeResult {
   macroInfo: MacroInfo | null;
   /** NS mode report timing measured on the dongle (protocol 3+). */
   latency: LatencyInfo | null;
+  /** Disconnect on the charging dock, read over the companion protocol in NS mode. */
+  nsDock: DockSettings | null;
   micActive: boolean | null;
   speakerActive: boolean | null;
   authorizedDeviceSerialNumber: Record<string, string>;
@@ -153,6 +157,7 @@ export interface UseDs5BridgeResult {
   forgetWakeBeacon: () => Promise<void>;
   setNsDraft: (next: NsSettings) => void;
   readMacroSlot: (slot: number) => Promise<MacroEvent[]>;
+  setNsDock: (next: DockSettings) => Promise<void>;
   writeMacroSlot: (slot: number, events: MacroEvent[]) => Promise<boolean>;
   resetToDefaults: () => Promise<void>;
   clearReturnHome: () => void;
@@ -191,6 +196,7 @@ export function useDs5Bridge(): UseDs5BridgeResult {
   const [nsSaveState, setNsSaveState] = useState<NsSaveState>("idle");
   const [macroInfo, setMacroInfo] = useState<MacroInfo | null>(null);
   const [latency, setLatency] = useState<LatencyInfo | null>(null);
+  const [nsDock, setNsDockState] = useState<DockSettings | null>(null);
   const nsDraftRef = useRef<NsSettings | null>(null);
   const nsWriteTimerRef = useRef<number | null>(null);
   const nsWritingRef = useRef(false);
@@ -221,7 +227,7 @@ export function useDs5Bridge(): UseDs5BridgeResult {
   // Set while the dongle reboots into another mode; it comes back with a different VID/PID.
   const modeSwitchTargetRef = useRef<DongleMode | null>(null);
   const pendingUsbReconnectDevicePortKeyRef = useRef<string | null>(null);
-  const companionMissingRef = useRef(new WeakSet<Ds5BridgeHidClient>());
+  const companionRetryAtRef = useRef(new WeakMap<Ds5BridgeHidClient, number>());
   const autoConnectInFlightKeyRef = useRef<string | null>(null);
   const failedAutoConnectAtRef = useRef<Record<string, number>>({});
   const pendingDisconnectDeviceKeyRef = useRef<string | null>(null);
@@ -401,6 +407,7 @@ export function useDs5Bridge(): UseDs5BridgeResult {
     setNsSaveState("idle");
     setMacroInfo(null);
     setLatency(null);
+    setNsDockState(null);
   }, []);
 
   const clearConnectedDevice = useCallback((options: { preserveConfig?: boolean; preserveReconnectTracking?: boolean } = {}) => {
@@ -624,15 +631,18 @@ export function useDs5Bridge(): UseDs5BridgeResult {
       return;
     }
     const withLatency = protocol >= PROTOCOL_LATENCY;
-    const [nextSettings, nextMacroInfo, nextLatency] = await Promise.all([
+    const withDock = protocol >= PROTOCOL_DOCK;
+    const [nextSettings, nextMacroInfo, nextLatency, nextDock] = await Promise.all([
       readNsSettings(target.companion),
       readMacroInfo(target.companion),
       withLatency ? readLatency(target.companion) : Promise.resolve(null),
+      withDock ? target.companion.getDock() : Promise.resolve(null),
     ]);
     if (clientRef.current !== target) {
       return;
     }
     setLatency(nextLatency);
+    setNsDockState(nextDock);
     setMacroInfo(nextMacroInfo);
     setNsSettings((current) => nsSettingsEqual(current, nextSettings) ? current : nextSettings);
     if (nsWriteTimerRef.current === null && !nsWritingRef.current) {
@@ -643,14 +653,19 @@ export function useDs5Bridge(): UseDs5BridgeResult {
 
   /** Polls dongle state. Throws when the device stopped answering. */
   const refreshDongleInfo = useCallback(async (target: Ds5BridgeHidClient) => {
-    const info = companionMissingRef.current.has(target)
+    const retryAt = companionRetryAtRef.current.get(target) ?? 0;
+    const info = Date.now() < retryAt
       ? null
-      : await target.companion.getInfo().catch((cause) => {
+      : await target.companion.getInfo().then((result) => {
+        companionRetryAtRef.current.delete(target);
+        return result;
+      }).catch((cause) => {
         if (target.isSwitchMode) {
           throw cause;
         }
-        // Older PC-mode firmware has no 0xFA report; stop asking this device.
-        companionMissingRef.current.add(target);
+        // Pre-companion firmware never answers; a dongle that just enumerated may
+        // miss one request. Ask again later rather than giving up for good.
+        companionRetryAtRef.current.set(target, Date.now() + COMPANION_RETRY_MS);
         return null;
       });
     if (clientRef.current !== target) {
@@ -1157,6 +1172,18 @@ export function useDs5Bridge(): UseDs5BridgeResult {
     }
   }, []);
 
+  const setNsDock = useCallback(async (next: DockSettings) => {
+    const target = clientRef.current;
+    if (!target) {
+      return;
+    }
+    try {
+      setNsDockState(await target.companion.setDock(next));
+    } catch (cause) {
+      setError(isCompanionMissingError(cause) ? t("errors.companionUnsupported") : errorMessage(cause, t));
+    }
+  }, [t]);
+
   const writeMacroSlot = useCallback(async (slot: number, events: MacroEvent[]): Promise<boolean> => {
     const target = clientRef.current;
     if (!target) {
@@ -1517,6 +1544,7 @@ export function useDs5Bridge(): UseDs5BridgeResult {
     nsSaveState,
     macroInfo,
     latency,
+    nsDock,
     micActive,
     speakerActive,
     authorizedDeviceSerialNumber,
@@ -1570,6 +1598,7 @@ export function useDs5Bridge(): UseDs5BridgeResult {
     forgetWakeBeacon,
     setNsDraft,
     readMacroSlot,
+    setNsDock,
     writeMacroSlot,
     resetToDefaults,
     clearReturnHome: () => {

@@ -26,6 +26,8 @@
   - 响应速度：向 Switch 发送报告的间隔，可从 15 毫秒（正版 Pro 手柄）调到 1 毫秒，并实时显示 DualSense 输入频率、报告频率和按下到下一次报告的等待时间（需固件 `switch-v4` 或更新）；
   - 4 个槽位的宏编辑器：每一步设置时间、按键和左右摇杆，可添加、插入、复制、移动、删除步骤。
 - **Switch 2 唤醒信标：** 显示是否已学习，可开始学习或清除。
+- **充电座**（需固件 `switch-v5` 或更新）：DualSense 放上充电座时断开（PC/NS 模式），NS 模式下可先让 Switch 进入睡眠。
+- PC/NS 设置页面采用相同布局：顶部状态栏（模式、DualSense、电量、信号、保存状态）和标签页。
 - 显示 DualSense 电量和信号，提供低电量与连接通知、托盘图标和开机自启。
 - 从 GitHub 检查程序和固件的新版本。
 
@@ -33,7 +35,7 @@
 
 ## 要求
 
-- 固件 **`switch-v3` 或更新**（[DS5Dongle_switch2 发布页](https://github.com/DoorWarning/DS5Dongle_switch2/releases)）。
+- 全部功能需固件 **`switch-v5` 或更新**（2.2.0 起通过 Feature 报告 `0xFE` 与接收器通信，`switch-v3`/`v4` 仍可通过旧的 `0xFA` 使用）（[DS5Dongle_switch2 发布页](https://github.com/DoorWarning/DS5Dongle_switch2/releases)）。
   - 旧固件只能显示状态和修改 PC 设置，不能切换模式或编辑 NS 设置。
 - NS 设置和宏只能在接收器**处于 NS 模式并插在电脑上**时编辑。在程序中切换到 NS 模式，编辑完成后再把接收器插回底座。
 - Windows 10/11，WebView2 运行时。

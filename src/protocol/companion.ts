@@ -12,6 +12,7 @@ export enum CompanionCommand {
   NsSettingsRead = 0x10,
   NsSettingsWrite = 0x11,
   NsSettingsApply = 0x12,
+  Dock = 0x13,
   MacroInfo = 0x20,
   MacroRead = 0x21,
   MacroEditBegin = 0x22,
@@ -32,6 +33,8 @@ export enum CompanionStatus {
 export const PROTOCOL_NS_EDIT = 2;
 /** First protocol version with the report cadence setting and latency readout. */
 export const PROTOCOL_LATENCY = 3;
+/** switch-v5: PC-mode report moved to 0xFE, and Config_body has disconnect_on_dock. */
+export const PROTOCOL_DOCK = 4;
 /** Bytes moved per request; fits both transports. */
 export const COMPANION_CHUNK = 32;
 
@@ -56,6 +59,17 @@ export interface DongleInfo {
   batteryPercent: number | null;
   charging: boolean;
   firmware: string;
+}
+
+export interface DockSettings {
+  /** Disconnect the DualSense when it is put on its charging dock. */
+  disconnect: boolean;
+  /** NS mode: put the Switch to sleep when the DualSense is put on its dock. */
+  sleepConsole: boolean;
+}
+
+function decodeDock(data: Uint8Array): DockSettings {
+  return { disconnect: data[0] === 1, sleepConsole: data[1] === 1 };
 }
 
 export class CompanionError extends Error {
@@ -176,6 +190,15 @@ export class CompanionClient {
   /** Erases the learned wake beacon. */
   async forgetWakeBeacon(): Promise<void> {
     await this.request(CompanionCommand.WakeForget);
+  }
+
+  /** Charging dock options, readable and settable in both modes (switch-v5+). */
+  async getDock(): Promise<DockSettings> {
+    return decodeDock(await this.request(CompanionCommand.Dock));
+  }
+
+  async setDock(next: DockSettings): Promise<DockSettings> {
+    return decodeDock(await this.request(CompanionCommand.Dock, [next.disconnect ? 1 : 0, next.sleepConsole ? 1 : 0]));
   }
 
   /** The dongle saves the mode and reboots shortly after replying. */
